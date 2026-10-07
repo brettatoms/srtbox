@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/brettatoms/srtbox/internal/config"
+	"github.com/brettatoms/srtbox/internal/policy"
 	"github.com/brettatoms/srtbox/internal/sandbox"
 )
 
@@ -113,8 +114,18 @@ func Main(args []string) int {
 
 	lb := scopeLoopback(meta.Forward, meta.Root, settings)
 
+	// The session directory is private to this launch and readable inside:
+	// it holds the policy for `srtbox why` and the broker's socket and links.
+	sess, err := os.MkdirTemp("", "srtbox-session-*")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "srtbox:", err)
+		return 1
+	}
+	cleanup = append(cleanup, func() { os.RemoveAll(sess) })
+	config.Append(settings, []string{"filesystem", "allowRead"}, sess)
+
 	if len(meta.Broker) > 0 {
-		benv, stop, err := startBroker(project, meta, settings)
+		benv, stop, err := startBroker(project, meta, settings, sess)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "srtbox:", err)
 			return 1
@@ -122,6 +133,18 @@ func Main(args []string) int {
 		cleanup = append(cleanup, stop)
 		env = append(env, benv...)
 	}
+
+	pol, err := policy.New(project, meta, settings)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "srtbox:", err)
+		return 1
+	}
+	polPath := filepath.Join(sess, "policy.json")
+	if err := pol.Write(polPath); err != nil {
+		fmt.Fprintln(os.Stderr, "srtbox:", err)
+		return 1
+	}
+	env = append(env, policy.Env+"="+polPath)
 
 	f, err := os.CreateTemp("", "srtbox-"+project+"-*.json")
 	if err != nil {

@@ -9,7 +9,9 @@ import (
 	"github.com/brettatoms/srtbox/internal/broker"
 	"github.com/brettatoms/srtbox/internal/launch"
 	"github.com/brettatoms/srtbox/internal/netproxy"
+	"github.com/brettatoms/srtbox/internal/policy"
 	"github.com/brettatoms/srtbox/internal/sandbox"
+	"github.com/brettatoms/srtbox/internal/why"
 )
 
 // version is set at release build time.
@@ -21,6 +23,7 @@ Usage:
   srtbox run [-p <project>] [--ssh <host>] [--key <path>] [--] <command> [args...]
   srtbox list                       list configured projects
   srtbox show [<project>]           print the settings srt would receive
+  srtbox why [-p <project>] <target>...  explain access to a path, host or $VAR
   srtbox approve                    answer commands waiting for approval
   srtbox version
 
@@ -68,6 +71,8 @@ func run(args []string) int {
 			project = args[1]
 		}
 		return launch.Show(project)
+	case "why":
+		return whyMain(args[1:])
 	case "approve":
 		return broker.ApproveMain(args[1:])
 	case "init":
@@ -89,4 +94,26 @@ func selfName() string {
 		exe = real
 	}
 	return filepath.Base(exe)
+}
+
+// whyMain explains from inside a session. On the host it starts a session for
+// the project and asks from there, since only probes inside show what the
+// sandbox sees.
+func whyMain(args []string) int {
+	if os.Getenv(policy.Env) != "" {
+		return why.Main(args)
+	}
+	var runArgs []string
+	if len(args) >= 2 && (args[0] == "-p" || args[0] == "--project") {
+		runArgs, args = []string{"-p", args[1]}, args[2:]
+	}
+	if len(args) == 0 {
+		return why.Main(nil)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "srtbox:", err)
+		return 1
+	}
+	return launch.Main(append(append(runArgs, "--", exe, "why"), args...))
 }

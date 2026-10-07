@@ -42,6 +42,7 @@ main.version=<tag>"` at the tag gives a byte-identical binary.
 srtbox run [-p <project>] [--ssh <host>] [--key <path>] [--] <command> [args...]
 srtbox list                       list configured projects
 srtbox show [<project>]           print the settings srt would receive
+srtbox why [-p <project>] <target>...   explain access to a path, host or variable
 srtbox approve                    answer brokered commands waiting for approval
 srtbox version
 ```
@@ -131,6 +132,38 @@ the host's loopback, so leave bare `127.0.0.1` and `localhost` out of
 `allowedDomains`: either would open every host port, databases and daemons
 included. When an `@file` port changes, srtbox sends srt the new allowlist over
 its control channel (`--control-fd`) and drops the old port.
+
+## Why is it blocked?
+
+`srtbox why` probes access from inside the sandbox and names the rule
+responsible, with the file it came from:
+
+```
+$ srtbox why ~/.aws/config example.com 127.0.0.1:8384 '$FIGMA_TOKEN'
+/home/me/.aws/config
+  read:  yes       allowRead "~/.aws/config" (myproject.json) re-opens denyRead "~" (base.json)
+  write: no        no allowWrite rule covers it
+
+example.com:443
+  reach: no        no allowedDomains entry matches it
+
+127.0.0.1:8384
+  reach: no        the host's loopback is reachable only on _forward ports, and this is not one
+
+$FIGMA_TOKEN
+  env:   withheld  matches _denyEnv "*TOKEN*"; list it in _allowEnv to pass it through
+```
+
+A target is a path, a host (`example.com`, `example.com:22`, a URL), or a
+variable (`'$NAME'`, or a name in capitals). Inside a session it explains that
+session; on the host it starts a session for the project (`-p`, or the one
+whose `_root` holds the working directory) and asks from there. It also
+recognises the cases that look like something else: a path hidden by
+`denyRead` reads as missing, a write under a masked directory succeeds and is
+discarded, and a write grant inside a re-opened read grant stays read-only.
+
+At launch srtbox records the session's merged policy, with each rule's source,
+in a private session directory that the sandbox can read.
 
 ## Broker
 

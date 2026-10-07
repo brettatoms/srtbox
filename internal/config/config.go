@@ -89,19 +89,28 @@ type Meta struct {
 
 // Load merges base.json (optional) with <project>.json.
 func Load(project string) (map[string]any, error) {
-	overlay, err := readJSON(filepath.Join(Dir(), project+".json"))
+	base, overlay, err := Layers(project)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			names, _ := Projects()
-			return nil, fmt.Errorf("no such project: %s (have: %s)", project, strings.Join(names, " "))
-		}
-		return nil, err
-	}
-	base, err := readJSON(filepath.Join(Dir(), "base.json"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 	return Merge(base, overlay).(map[string]any), nil
+}
+
+// Layers returns base.json (nil when absent) and <project>.json, unmerged.
+func Layers(project string) (base, overlay map[string]any, err error) {
+	overlay, err = readJSON(filepath.Join(Dir(), project+".json"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			names, _ := Projects()
+			return nil, nil, fmt.Errorf("no such project: %s (have: %s)", project, strings.Join(names, " "))
+		}
+		return nil, nil, err
+	}
+	base, err = readJSON(filepath.Join(Dir(), "base.json"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, nil, err
+	}
+	return base, overlay, nil
 }
 
 func readJSON(path string) (map[string]any, error) {

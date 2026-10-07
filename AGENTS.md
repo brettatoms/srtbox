@@ -25,6 +25,8 @@ brokered program's name.
 | `internal/config`, `internal/launch` | host |
 | `internal/sandbox`, `internal/netproxy` | inside the sandbox |
 | `internal/broker` | both: the server on the host, `ClientMain` inside |
+| `internal/policy` | both: written at launch, read inside |
+| `internal/why` | inside the sandbox |
 
 The launcher hands state to `srtbox init` through `SRTBOX_*` environment
 variables. Code that runs inside has no host loopback and reaches the network
