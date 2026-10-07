@@ -104,7 +104,14 @@ func script(t *testing.T, dir, name, body string) string {
 
 func serve(t *testing.T, s *Server) string {
 	t.Helper()
-	sock := filepath.Join(t.TempDir(), "b.sock")
+	// t.TempDir embeds the test's name, which can push a socket path past
+	// macOS's 104-byte limit.
+	dir, err := os.MkdirTemp("", "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "b.sock")
 	l, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +122,9 @@ func serve(t *testing.T, s *Server) string {
 }
 
 func TestServerRunsChecksAndRelays(t *testing.T) {
-	dir := t.TempDir()
+	// pwd prints the resolved path; on macOS the temporary directory sits
+	// behind a link.
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	root := filepath.Join(dir, "root")
 	os.Mkdir(root, 0o755)
 	prog := &Program{

@@ -169,7 +169,9 @@ func TestProjectForPicksTheDeepestRoot(t *testing.T) {
 }
 
 func TestFollowLinksAddsTargetsButNotPlantableOnes(t *testing.T) {
-	home := t.TempDir()
+	// Link targets come back resolved; on macOS the temporary directory sits
+	// behind a link.
+	home, _ := filepath.EvalSymlinks(t.TempDir())
 	os.MkdirAll(filepath.Join(home, "cloud", ".claude"), 0o755)
 	os.Symlink(filepath.Join(home, "cloud", ".claude"), filepath.Join(home, ".claude"))
 	os.MkdirAll(filepath.Join(home, "proj"), 0o755)

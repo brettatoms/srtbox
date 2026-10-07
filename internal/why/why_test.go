@@ -99,7 +99,13 @@ func TestSrtProtects(t *testing.T) {
 }
 
 func TestPathAndEnvExplanations(t *testing.T) {
-	dir := t.TempDir()
+	// Path follows links before matching rules; on macOS the temporary
+	// directory sits behind a link.
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	// Env reports a set variable as visible, as GH_TOKEN is in a session that
+	// injects it. t.Setenv restores it afterwards.
+	t.Setenv("GH_TOKEN", "")
+	os.Unsetenv("GH_TOKEN")
 	ro := filepath.Join(dir, "ro")
 	os.Mkdir(ro, 0o555)
 	pol := &policy.Policy{OS: "linux", DenyEnv: []string{"*TOKEN*"}, Settings: map[string]any{
