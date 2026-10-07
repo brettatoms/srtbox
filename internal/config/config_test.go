@@ -104,6 +104,25 @@ func TestProtectReposFindsNestedReposWorktreesAndHooksPath(t *testing.T) {
 	}
 }
 
+func TestProtectReposSkipsMissingRepoFiles(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".git/hooks"), 0o755)
+	os.MkdirAll(filepath.Join(root, ".claude/commands"), 0o755)
+	os.WriteFile(filepath.Join(root, ".mcp.json"), []byte("{}"), 0o644)
+
+	got := ProtectRepos(root, 5, func(string) string { return "" })
+	for _, want := range []string{".mcp.json", ".claude/commands"} {
+		if !slices.Contains(got, filepath.Join(root, want)) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	for _, absent := range []string{".gitmodules", ".vscode", ".idea", ".claude/agents"} {
+		if slices.Contains(got, filepath.Join(root, absent)) {
+			t.Errorf("protected %s, which does not exist", absent)
+		}
+	}
+}
+
 func TestDropCovered(t *testing.T) {
 	got := dropCovered([]string{"/r/.husky", "/r/.husky-x", "/r/.husky/_", "/r/.git/hooks"})
 	want := []string{"/r/.husky", "/r/.husky-x", "/r/.git/hooks"}

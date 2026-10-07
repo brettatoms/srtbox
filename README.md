@@ -90,9 +90,16 @@ is every repo but the outer one. srtbox finds each repo and worktree under
 `_root` and protects its `.git/hooks`, `.git/config`, `config.worktree`, a
 worktree's `.git` pointer, the directory `core.hooksPath` names (husky's
 `.husky/_` protects all of `.husky`), hook-manager config such as
-`lefthook.yml`, and `.mcp.json`, `.vscode`, `.idea` and `.gitmodules`. Each of
-these runs code on the host the next time git, an editor or an agent opens the
-repo, without anyone choosing to run it.
+`lefthook.yml`, and `.mcp.json`, `.vscode`, `.idea`, `.gitmodules`,
+`.claude/commands` and `.claude/agents`. Each of these runs code on the host the
+next time git, an editor or an agent opens the repo, without anyone choosing to
+run it.
+
+Hook locations are protected even before they exist. The other files are
+protected only if present at launch, so a session can create one where the
+repo has none. srt blocks creating a missing path by mounting over it, which
+leaves an empty placeholder in the working tree for the whole session: it shows
+up in `git status` and stops the directory being removed.
 
 **The login ssh-agent is withheld.** `SSH_AUTH_SOCK` is unset and its socket
 masked, since the path alone is enough to use it. `--ssh` opens a single host

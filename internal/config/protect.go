@@ -96,19 +96,20 @@ func dropCovered(paths []string) []string {
 	return out
 }
 
+// repoFiles are working-tree files that tools load from a repo. Only those
+// present at launch are protected: srt blocks creating a missing path by
+// mounting over it, which leaves an empty placeholder file in the working tree
+// for as long as the session runs.
+var repoFiles = []string{".mcp.json", ".vscode", ".idea", ".gitmodules", ".claude/commands", ".claude/agents"}
+
 func protectRepoFiles(repo, hooks string, add func(string)) {
-	for _, f := range []string{".mcp.json", ".vscode", ".idea", ".gitmodules"} {
-		add(filepath.Join(repo, f))
-	}
-	for _, f := range hookManagers {
-		if exists(filepath.Join(repo, f)) {
-			add(filepath.Join(repo, f))
+	for _, f := range append(repoFiles, hookManagers...) {
+		if p := filepath.Join(repo, f); exists(p) {
+			add(p)
 		}
 	}
-	if exists(filepath.Join(repo, ".claude")) {
-		add(filepath.Join(repo, ".claude", "commands"))
-		add(filepath.Join(repo, ".claude", "agents"))
-	}
+	// Hook locations are protected whether or not they exist yet: git runs
+	// whatever appears there, with no one choosing to.
 	if hooks == "" {
 		return
 	}
