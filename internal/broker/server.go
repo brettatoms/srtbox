@@ -70,7 +70,11 @@ func (s *Server) handle(conn net.Conn) {
 		}
 	}
 	if v == runApproved {
-		out.send(kindStderr, []byte("srtbox: waiting for approval: answer the notification, or run `srtbox approve` on the host\n"))
+		msg := "srtbox: waiting for approval: answer the notification, or run `srtbox approve` on the host\n"
+		if len(display(p.Name, req.Argv)) > notifyLimit {
+			msg = "srtbox: waiting for approval: the command is too long for a notification; run `srtbox approve` on the host\n"
+		}
+		out.send(kindStderr, []byte(msg))
 		if ok, why := s.Approver.Ask(p.Name, rule, req.Argv, cwd); !ok {
 			refuse(display(p.Name, req.Argv) + " was not approved: " + why)
 			return

@@ -33,8 +33,8 @@ Without -p, run and show use the project whose _root contains the working
 directory.
 
 --ssh opens a host for the session through a throwaway ssh-agent holding only
-the keys of the hosts opened; repeat it for more hosts, and put --key after the
---ssh it is for. Without --ssh there is no SSH: the login agent is withheld.
+that host's key; repeat it for more hosts, and put --key after the --ssh it is
+for. Without --ssh there is no SSH: the login agent is withheld.
 Inside, use: ssh -F "$SRTBOX_SSH_CONFIG" <host>. git picks it up on its own.
 `
 

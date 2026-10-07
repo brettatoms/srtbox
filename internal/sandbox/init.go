@@ -23,7 +23,8 @@ import (
 //   - restores GIT_SSH_COMMAND for --ssh, which srt overwrites with its own
 //   - forwards termination signals and reports a signal death as 128+N
 //
-// When none of that applies it execs the command, leaving no extra process.
+// It stays the command's parent even when nothing else needs it, because srt
+// reports a signal death of its direct child as a plain exit status.
 func Init(args []string) int {
 	if len(args) > 0 && args[0] == "--" {
 		args = args[1:]
@@ -36,9 +37,8 @@ func Init(args []string) int {
 		os.Setenv("GIT_SSH_COMMAND", v)
 	}
 
-	// Relays keep following their ports for the whole session, so Init stays
-	// the command's parent whenever any are declared. Ports bound later are
-	// not announced: the command owns the terminal by then.
+	// Relays keep following their ports for the whole session. Ports bound
+	// later are not announced: the command owns the terminal by then.
 	var entries []string
 	if runtime.GOOS == "linux" {
 		json.Unmarshal([]byte(os.Getenv("SRTBOX_FORWARD")), &entries)
@@ -51,17 +51,6 @@ func Init(args []string) int {
 		go r.Follow(netproxy.RelayInterval)
 	}
 	tty := resizeTTY()
-
-	if len(entries) == 0 && tty < 0 {
-		path, err := exec.LookPath(args[0])
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "srtbox:", err)
-			return 127
-		}
-		err = syscall.Exec(path, args, os.Environ())
-		fmt.Fprintln(os.Stderr, "srtbox: exec:", err)
-		return 126
-	}
 
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr

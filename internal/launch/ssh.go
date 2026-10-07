@@ -3,7 +3,6 @@ package launch
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -18,6 +17,7 @@ import (
 )
 
 type sshSession struct {
+	dir     string   // holds the agents' sockets
 	allow   []string // allowedDomains entries for the hosts
 	env     []string
 	cleanup func()
@@ -26,30 +26,24 @@ type sshSession struct {
 // sshTarget is one --ssh host and the key named by the --key after it.
 type sshTarget struct{ host, key string }
 
-// setupSSH opens the given hosts for the session. It starts one throwaway
-// ssh-agent holding only their keys and writes an ssh config that reaches
-// each through srt's proxy, offering each host only its own key. Key material
-// never enters the sandbox — only a signing channel to the agent — and
-// host-key checking stays strict.
+// setupSSH opens the given hosts for the session. Each host gets its own
+// throwaway ssh-agent holding only its key, so a process speaking the agent
+// protocol directly still cannot use one host's key for another. The ssh
+// config reaches each host through srt's proxy. Key material never enters the
+// sandbox — only a signing channel to each agent — and host-key checking
+// stays strict.
 func setupSSH(targets []sshTarget) (*sshSession, error) {
 	dir, err := os.MkdirTemp("", "srtbox-ssh-")
 	if err != nil {
 		return nil, err
 	}
-	s := &sshSession{cleanup: func() { os.RemoveAll(dir) }}
-
-	sock := filepath.Join(dir, "agent.sock")
-	agentOut, err := exec.Command("ssh-agent", "-s", "-a", sock).Output()
-	if err != nil {
-		return s, fmt.Errorf("ssh-agent: %w", err)
-	}
-	if m := regexp.MustCompile(`SSH_AGENT_PID=(\d+)`).FindSubmatch(agentOut); m != nil {
-		pid, _ := strconv.Atoi(string(m[1]))
-		s.cleanup = func() {
+	var agents []int
+	s := &sshSession{dir: dir, cleanup: func() {
+		for _, pid := range agents {
 			syscall.Kill(pid, syscall.SIGTERM)
-			os.RemoveAll(dir)
 		}
-	}
+		os.RemoveAll(dir)
+	}}
 	exe, err := self()
 	if err != nil {
 		return s, err
@@ -58,6 +52,15 @@ func setupSSH(targets []sshTarget) (*sshSession, error) {
 	var conf, knownHosts bytes.Buffer
 	var hosts []string
 	for i, t := range targets {
+		sock := filepath.Join(dir, fmt.Sprintf("agent%d.sock", i))
+		agentOut, err := exec.Command("ssh-agent", "-s", "-a", sock).Output()
+		if err != nil {
+			return s, fmt.Errorf("ssh-agent: %w", err)
+		}
+		if m := regexp.MustCompile(`SSH_AGENT_PID=(\d+)`).FindSubmatch(agentOut); m != nil {
+			pid, _ := strconv.Atoi(string(m[1]))
+			agents = append(agents, pid)
+		}
 		h, err := sshHost(t, dir, i, sock, exe)
 		if err != nil {
 			return s, err
@@ -88,8 +91,8 @@ type sshHostSetup struct {
 }
 
 // sshHost resolves one target through ~/.ssh/config, adds its key to the
-// session agent at sock, and returns its config block, known_hosts lines
-// and allowlist entries. i numbers the host's public-key file in dir.
+// host's agent at sock, and returns its config block, known_hosts lines and
+// allowlist entries. i numbers the host's public-key file in dir.
 func sshHost(t sshTarget, dir string, i int, sock, exe string) (*sshHostSetup, error) {
 	out, err := exec.Command("ssh", "-G", t.host).Output()
 	if err != nil {
@@ -188,5 +191,5 @@ func parseSSHConfig(out []byte) map[string][]string {
 
 func exists(p string) bool {
 	_, err := os.Stat(p)
-	return !errors.Is(err, os.ErrNotExist)
+	return err == nil
 }

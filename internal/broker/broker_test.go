@@ -15,17 +15,19 @@ import (
 
 func TestClassify(t *testing.T) {
 	p := &Program{
-		Host:    [][]string{{"aws", "logs"}, {"wt"}},
-		Approve: [][]string{{"wt", "remove"}, {"aws", "logs"}},
+		Host:    [][]string{{"aws", "logs"}, {"wt"}, {"db", "drop", "table"}},
+		Approve: [][]string{{"wt", "remove"}, {"aws", "logs"}, {"db", "drop"}},
 	}
 	cases := []struct {
 		argv []string
 		want verdict
 	}{
-		{[]string{"aws", "logs", "--env", "stg"}, runApproved}, // tie: approve wins
+		{[]string{"aws", "logs", "--env", "stg"}, runApproved}, // in both: approve wins
 		{[]string{"wt", "list"}, runHost},
-		{[]string{"wt", "--force", "remove", "x"}, runApproved}, // flags are skipped
-		{[]string{"wt", "--", "remove"}, runHost},               // "--" ends the command words
+		{[]string{"wt", "remove", "--name", "x"}, runApproved},
+		{[]string{"db", "drop", "table", "users"}, runApproved}, // a longer host rule does not remove the approval
+		{[]string{"--region", "aws", "logs"}, runLocal},         // a flag value cannot pose as a command word
+		{[]string{"wt", "--force", "remove"}, runHost},          // words must lead: this is `wt`, not `wt remove`
 		{[]string{"db", "reset"}, runLocal},
 		{nil, runLocal},
 	}
@@ -223,5 +225,50 @@ func TestParseRejectsBadNames(t *testing.T) {
 	got, err := Parse(map[string]any{"sh": map[string]any{"host": []any{[]any{"x"}}}})
 	if err != nil || got["sh"].Path == "" || got["sh"].Host[0][0] != "x" {
 		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestApprovalOfALongCommandSkipsTheNotification(t *testing.T) {
+	dir := t.TempDir()
+	notified := false
+	a := &Approver{Project: "p", Dir: dir, Timeout: 2 * time.Second,
+		Notify: func(context.Context, string, string) string { notified = true; return "once" }}
+	long := strings.Repeat("x", notifyLimit) + "TAIL"
+	go func() {
+		for i := 0; i < 50; i++ {
+			files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+			if len(files) == 1 {
+				b, _ := os.ReadFile(files[0])
+				if strings.Contains(string(b), "TAIL") && strings.Contains(string(b), `with any arguments`) {
+					os.WriteFile(strings.TrimSuffix(files[0], ".json")+".answer", []byte("deny"), 0o600)
+				}
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}()
+	ok, why := a.Ask("tool", []string{"rm"}, []string{"rm", long}, "/")
+	if ok || why != "denied" {
+		t.Fatalf("got %v %q; the pending file should hold the whole command and its session scope", ok, why)
+	}
+	if notified {
+		t.Error("a command too long to show was offered in a notification")
+	}
+}
+
+func TestAPendingApprovalDoesNotBlockGrantedCommands(t *testing.T) {
+	a := &Approver{Project: "p", Dir: t.TempDir(), Timeout: time.Second,
+		granted: map[string]bool{"tool\x00ok": true}}
+	go a.Ask("tool", []string{"slow"}, []string{"slow"}, "/") // waits for its timeout
+	time.Sleep(50 * time.Millisecond)
+	done := make(chan bool)
+	go func() { ok, _ := a.Ask("tool", []string{"ok"}, []string{"ok"}, "/"); done <- ok }()
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Error("granted rule refused")
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Error("a granted command waited on another command's approval")
 	}
 }

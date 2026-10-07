@@ -117,3 +117,20 @@ func TestBuildFillsTheListsSrtRequires(t *testing.T) {
 		}
 	}
 }
+
+func TestScopeUnixSocketsOnMacOSOnly(t *testing.T) {
+	mac := map[string]any{"network": map[string]any{"allowAllUnixSockets": true, "allowUnixSockets": []any{"/var/run/docker.sock"}}}
+	scopeUnixSockets(mac, "darwin", "/tmp/session", "/tmp/ssh")
+	n := mac["network"].(map[string]any)
+	if n["allowAllUnixSockets"] != false {
+		t.Error("macOS kept every socket allowed")
+	}
+	if !reflect.DeepEqual(n["allowUnixSockets"], []any{"/var/run/docker.sock", "/tmp/session", "/tmp/ssh"}) {
+		t.Errorf("allowUnixSockets %v", n["allowUnixSockets"])
+	}
+	linux := map[string]any{"network": map[string]any{"allowAllUnixSockets": true}}
+	scopeUnixSockets(linux, "linux", "/tmp/session")
+	if linux["network"].(map[string]any)["allowAllUnixSockets"] != true {
+		t.Error("changed Linux settings")
+	}
+}

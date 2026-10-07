@@ -70,47 +70,39 @@ const (
 	runApproved
 )
 
-// classify picks the longest rule matching argv. An approve rule wins a tie,
-// so a command listed both ways asks first.
+// classify decides where argv runs. Any matching approve rule wins, so a
+// longer host rule cannot remove an approval; otherwise the longest matching
+// host rule applies.
 func (p *Program) classify(argv []string) (verdict, []string) {
-	w := words(argv)
-	v, best := runLocal, []string(nil)
-	for _, r := range p.Host {
-		if prefix(w, r) && len(r) > len(best) {
-			v, best = runHost, r
-		}
-	}
+	var best []string
 	for _, r := range p.Approve {
-		if prefix(w, r) && len(r) >= len(best) {
-			v, best = runApproved, r
+		if leads(argv, r) && len(r) > len(best) {
+			best = r
 		}
 	}
-	return v, best
+	if best != nil {
+		return runApproved, best
+	}
+	for _, r := range p.Host {
+		if leads(argv, r) && len(r) > len(best) {
+			best = r
+		}
+	}
+	if best != nil {
+		return runHost, best
+	}
+	return runLocal, nil
 }
 
 func (p *Program) wantsStdin(argv []string) bool {
-	w := words(argv)
-	return slices.ContainsFunc(p.Stdin, func(r []string) bool { return prefix(w, r) })
+	return slices.ContainsFunc(p.Stdin, func(r []string) bool { return leads(argv, r) })
 }
 
-// words returns the leading non-flag arguments, which name the command. It
-// stops at "--".
-func words(argv []string) []string {
-	var out []string
-	for _, a := range argv {
-		if a == "--" {
-			break
-		}
-		if len(a) > 0 && a[0] == '-' {
-			continue
-		}
-		out = append(out, a)
-	}
-	return out
-}
-
-func prefix(w, rule []string) bool {
-	return len(rule) > 0 && len(rule) <= len(w) && slices.Equal(w[:len(rule)], rule)
+// leads reports whether argv begins with exactly the rule's words. Nothing may
+// come before them: srtbox cannot know which of a program's flags take a
+// value, so `prog --region aws logs` must not pass for `aws logs`.
+func leads(argv, rule []string) bool {
+	return len(rule) > 0 && len(rule) <= len(argv) && slices.Equal(argv[:len(rule)], rule)
 }
 
 func sortedKeys[V any](m map[string]V) []string {

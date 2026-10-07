@@ -61,14 +61,15 @@ echo secret-file > ~/srtbox-test/outside/file.txt
   "_denyEnv": ["*TOKEN*", "*_KEY", "*_SECRET", "*PASSWORD*"],
   "_allowEnv": ["SRTBOX_TEST_ALLOWED_TOKEN"],
   "network": {
-    "allowedDomains": ["github.com", "*.github.com", "api.github.com", "example.com", "registry.npmjs.org"],
+    "allowedDomains": ["github.com", "*.github.com", "api.github.com", "example.com", "registry.npmjs.org",
+                       "api.anthropic.com", "claude.ai", "*.claude.com", "console.anthropic.com", "statsig.anthropic.com"],
     "allowAllUnixSockets": true,
     "allowLocalBinding": true
   },
   "filesystem": {
     "denyRead": ["~"],
-    "allowRead": ["~/srtbox-test/proj", "~/.gitconfig"],
-    "allowWrite": ["~/srtbox-test/proj", "/tmp", "/private/tmp"]
+    "allowRead": ["~/srtbox-test/proj", "~/.gitconfig", "~/.config/gh", "~/.local/bin", "~/.claude", "~/.claude.json"],
+    "allowWrite": ["~/srtbox-test/proj", "/tmp", "/private/tmp", "~/.claude", "~/.claude.json"]
   }
 }
 ```
@@ -124,7 +125,7 @@ export SRTBOX_CONFIG_DIR=~/srtbox-test/config
 | 1.2 | `srtbox show \| head` | JSON settings; no `_` keys |
 | 1.3 | `srtbox run -- true; echo $?` | `0` |
 | 1.4 | `srtbox run -- sh -c 'exit 7'; echo $?` | `7` |
-| 1.5 | `srtbox run -- sh -c 'kill -TERM $$'; echo $?` | `143` |
+| 1.5 | `srtbox run -- sh -c 'kill -TERM $$'; echo $?`, then the same with `kill -KILL` | `143`, then `137` |
 | 1.6 | `cd /tmp && srtbox run -- true` | refuses: no project's `_root` contains `/tmp` |
 | 1.7 | `cd /tmp && srtbox run -p t -- true` | runs, with a warning that cwd is outside the root |
 | 1.8 | `srtbox banzai true` | `unknown command`, exit 2 |
@@ -168,7 +169,7 @@ export SRTBOX_TEST_SECRET_TOKEN=aaaa SRTBOX_TEST_ALLOWED_TOKEN=bbbb HOST_AGENT="
 | 4.1 | `echo ${SRTBOX_TEST_SECRET_TOKEN:-unset}` | `unset` |
 | 4.2 | `echo ${SRTBOX_TEST_ALLOWED_TOKEN:-unset}` | `bbbb` |
 | 4.3 | `echo ${SSH_AUTH_SOCK:-unset}` | `unset` |
-| 4.4 | `SSH_AUTH_SOCK="$HOST_AGENT" ssh-add -l; echo $?` | fails (exit 2, cannot connect). **Important:** srtbox denies reading the login agent's socket; on macOS that may not stop `connect()`. If this lists keys, the login agent is reachable from the sandbox. |
+| 4.4 | `SSH_AUTH_SOCK="$HOST_AGENT" ssh-add -l; echo $?` | exit 2, cannot connect. **Important:** on macOS srtbox allows only its own Unix sockets plus `allowUnixSockets`. Exit 1 ("The agent has no identities") or a key list means the login agent is reachable. |
 
 ## 5. Network
 
@@ -210,7 +211,7 @@ Stop both servers afterwards.
 | 7.7 | `srtbox run -- hosttool tty` from an interactive terminal (ask the user to run it) | `tty` |
 | 7.8 | `hosttool risky` | prints `waiting for approval`; a dialog appears. Ask the user to click **Deny**; expect exit 126 "denied" |
 | 7.9 | `hosttool risky` again, and this time answer from a second terminal outside: `srtbox approve`, then `o` | `ran on host` |
-| 7.10 | Inside: `ls "$TMPDIR"/srtbox-$(id -u)/approvals; touch "$TMPDIR"/srtbox-$(id -u)/approvals/x` | not listable, not writable. **Important:** a writable approvals directory would let the sandbox approve its own requests |
+| 7.10 | Outside first: `export HOST_TMP="$TMPDIR"` (srt sets a different `TMPDIR` inside). Inside: `ls "$HOST_TMP"/srtbox-$(id -u)/approvals; touch "$HOST_TMP"/srtbox-$(id -u)/approvals/x` | not listable, not writable. **Important:** a writable approvals directory would let the sandbox approve its own requests |
 | 7.11 | `hosttool risky` with no answer for 2 minutes | refused: "no answer within 2m0s" |
 
 ## 8. SSH
@@ -254,13 +255,31 @@ Remove `_inject` afterwards.
 | 11.1 | Run two sessions at once: `srtbox run -- sleep 10 & srtbox run -- sh -c 'hosttool host'; wait` | both work |
 | 11.2 | Afterwards: `ls -d "$TMPDIR"/srtbox-* /tmp/srtbox-* 2>/dev/null` | only `srtbox-<uid>` (the approvals parent), no session, ssh or settings files |
 | 11.3 | Ask the user to run `srtbox run -- vim` (or `htop`) and resize the window | redraws at the new size |
-| 11.4 | Ask the user to run `srtbox run -p t -- claude` and try a few commands | Claude starts and works; record anything odd |
+| 11.4 | Ask the user to run `srtbox run -p t -- claude` and try a few commands | Claude starts and works. Record any garbled text, such as stray escape sequences or dropped characters, with a screenshot if they can |
 
 ## 12. Clean up
 
 ```sh
 pkill -f 'http.server 473' ; rm -rf ~/srtbox-test
 ```
+
+## Second pass
+
+After a first run, the user may ask for a second pass instead of the full
+runbook. Do setup (section 0), then only these checks, and write
+`~/srtbox-test/results-2.md` in the same format:
+
+- 1.5: signal deaths report `143` and `137`.
+- 2.2 with `srtbox why ~/srtbox-test/outside/file.txt`: says `denyRead "~"`
+  without "looks missing".
+- 4.4: the login agent is unreachable.
+- 7.1 to 7.11: the broker still works with the socket allowlist.
+- 8.1, 8.2, 8.4: `--ssh` still works with the socket allowlist.
+- 9.2 to 9.6: with `~/.config/gh` readable, whether `gh api user -q .login`
+  works with an injected token. If it fails, record the exact error; a
+  certificate error answers the open question.
+- 11.4: Claude inside the sandbox, including whether the terminal output is
+  garbled.
 
 ## Results format
 

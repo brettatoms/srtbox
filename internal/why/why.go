@@ -102,6 +102,8 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 	// Read.
 	readErr := probeRead(p, info, statErr)
 	switch {
+	case !exists && masked && pol.OS == "darwin":
+		line(w, "read", "no", rule(pol, "denyRead", denyR))
 	case !exists && masked:
 		line(w, "read", "no", "hidden by "+rule(pol, "denyRead", denyR)+"; inside, it looks missing")
 	case !exists:

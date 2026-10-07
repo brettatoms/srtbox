@@ -59,6 +59,11 @@ other values from the project win. The result is srt's own
 [settings format](https://github.com/anthropics/sandbox-runtime#configuration),
 so everything srt supports can be set here.
 
+Reads are allowed everywhere unless denied: `denyRead` is a blocklist, and
+`allowRead` re-opens paths inside it. With `denyRead: ["~"]` the sandbox still
+reads `/etc`, `/tmp` and anything else outside your home directory. Writes are
+the reverse: denied everywhere except `allowWrite`.
+
 Keep this directory outside every project you sandbox. A policy file inside a
 project tree is writable from inside the sandbox, and the next launch would
 honour whatever the sandboxed process wrote.
@@ -223,21 +228,26 @@ names programs whose matching commands run on the host instead:
 }
 ```
 
-A rule is a list of leading command words; flags are skipped, and `--` ends the
-words. `host` rules run straight away. `approve` rules ask first. Anything else
-runs the real program inside the sandbox as usual. When rules overlap the
-longest wins, and an `approve` rule wins a tie.
+A rule is a list of command words that must be the first arguments, with
+nothing before them: `["aws", "logs"]` matches `bz aws logs --env stg` but not
+`bz --env stg aws logs`. srtbox cannot know which of a program's flags take a
+value, so it does not skip any. `host` rules run straight away. `approve` rules
+ask first, and any matching `approve` rule wins over `host` rules. Anything else
+runs the real program inside the sandbox as usual.
 
 - `path` is the real program, found on `PATH` when omitted.
 - `check`, if set, runs on the host with the command's arguments before
   anything else. A non-zero exit refuses the command, and the check's output
-  says why. Use it for limits the command words cannot express.
+  says why. Use it for limits the command words cannot express. A rule
+  without one hands the sandbox everything that program can do with those
+  leading words, using your host credentials.
 - `stdin` rules get the caller's input. Every other command reads `/dev/null`,
   so a brokered command never consumes input meant for something else.
 
 Inside, a directory first on `PATH` holds a link named after each program, so
 `bz …` reaches the broker while `./bin/bz …` runs the real program directly.
-Brokered commands run with the host environment, in the caller's directory
+Brokered commands run with the full host environment, tokens included, in the
+caller's directory
 (kept within `_root`), on a pseudo-terminal when the caller has one. The
 broker is part of the `srtbox` process that launched the session, so it lives
 exactly as long as the session.
@@ -245,9 +255,11 @@ exactly as long as the session.
 **Approvals.** An `approve` command waits for your answer, given through a
 desktop notification (`notify-send` on Linux, a dialog on macOS) or by running
 `srtbox approve` in a terminal outside the sandbox. "Allow for session" covers
-later commands matching the same rule. With no answer within two minutes the
-command is refused. The directory holding pending requests is denied to the
-sandbox, which could otherwise answer its own.
+later commands matching the same rule with any arguments, and both prompts say
+so. A command too long to show whole in a notification is offered only through
+`srtbox approve`. With no answer within two minutes the command is refused. The
+directory holding pending requests is denied to the sandbox, which could
+otherwise answer its own.
 
 ## SSH
 
@@ -259,12 +271,12 @@ srtbox run --ssh github.com --ssh build-box --key ~/.ssh/build claude
 ssh -F "$SRTBOX_SSH_CONFIG" build-box       # inside
 ```
 
-srtbox resolves each host through `~/.ssh/config`, starts one throwaway
-ssh-agent holding only those hosts' keys, adds each `host:port` to the allowed
-domains, and writes an ssh config that reaches them through srt's proxy, each
-host offered only its own key. The keys never enter the sandbox, only a
-signing channel to the agent, and host-key checking stays strict: each host has
-to be in `~/.ssh/known_hosts` already. git uses this config automatically.
+srtbox resolves each host through `~/.ssh/config`, starts a throwaway
+ssh-agent per host holding only that host's key, adds each `host:port` to the
+allowed domains, and writes an ssh config that reaches them through srt's
+proxy. The keys never enter the sandbox, only a signing channel to each agent,
+and host-key checking stays strict: each host has to be in
+`~/.ssh/known_hosts` already. git uses this config automatically.
 `--key` picks the identity for the `--ssh` before it, when that host has
 several.
 
@@ -283,6 +295,12 @@ On macOS a host dev server or REPL is reachable only with
 not just the `_forward` ones. Seatbelt fixes its rules at launch and srt has no
 per-port loopback setting, so srtbox cannot narrow it. Linux needs no such
 setting.
+
+On macOS srtbox also turns `allowAllUnixSockets` off and allows only its own
+sockets (the broker's and the `--ssh` agents') plus `allowUnixSockets`.
+Seatbelt lets a sandbox connect to a socket whose path it cannot read, so with
+every socket allowed the login ssh-agent would stay usable. List any other
+socket a project needs, such as Docker's, in `allowUnixSockets`.
 
 ## Limits
 

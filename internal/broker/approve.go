@@ -44,13 +44,19 @@ func ApprovalDir() string {
 type pending struct {
 	Project string `json:"project"`
 	Command string `json:"command"`
+	Scope   string `json:"scope"` // what "for this session" would allow
 	Cwd     string `json:"cwd"`
 	PID     int    `json:"pid"`
 }
 
-// Approver asks the user about one command at a time, through a desktop
-// notification and a pending file that `srtbox approve` answers; the first
-// answer wins. "Allow for session" covers later calls matching the same rule.
+// notifyLimit is the longest command a desktop notification shows. A longer
+// one is not offered there, since notifications cut text off and the part
+// hidden could be what matters; `srtbox approve` shows it whole.
+const notifyLimit = 300
+
+// Approver asks the user about commands through a desktop notification and a
+// pending file that `srtbox approve` answers; the first answer wins. "Allow
+// for session" covers later calls matching the same rule, with any arguments.
 type Approver struct {
 	Project string
 	Dir     string
@@ -72,19 +78,24 @@ func NewApprover(project string) *Approver {
 // approve rule that matched.
 func (a *Approver) Ask(program string, rule, argv []string, cwd string) (bool, string) {
 	key := program + "\x00" + strings.Join(rule, "\x00")
+	// The lock covers the grants and the counter, not the wait, so one
+	// unanswered request does not hold up the session's other commands.
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.granted[key] {
+	granted := a.granted[key]
+	a.seq++
+	seq := a.seq
+	a.mu.Unlock()
+	if granted {
 		return true, ""
 	}
 
 	command := display(program, argv)
+	scope := display(program, rule) + " with any arguments, until the session ends"
 	if err := os.MkdirAll(a.Dir, 0o700); err != nil {
 		return false, err.Error()
 	}
-	a.seq++
-	base := filepath.Join(a.Dir, fmt.Sprintf("%d-%d", os.Getpid(), a.seq))
-	b, _ := json.Marshal(pending{Project: a.Project, Command: command, Cwd: cwd, PID: os.Getpid()})
+	base := filepath.Join(a.Dir, fmt.Sprintf("%d-%d", os.Getpid(), seq))
+	b, _ := json.Marshal(pending{Project: a.Project, Command: command, Scope: scope, Cwd: cwd, PID: os.Getpid()})
 	if err := os.WriteFile(base+".json", b, 0o600); err != nil {
 		return false, err.Error()
 	}
@@ -94,9 +105,10 @@ func (a *Approver) Ask(program string, rule, argv []string, cwd string) (bool, s
 	ctx, cancel := context.WithTimeout(context.Background(), a.Timeout)
 	defer cancel()
 	answers := make(chan string, 2)
-	if a.Notify != nil {
+	if a.Notify != nil && len(command) <= notifyLimit {
 		go func() {
-			if ans := a.Notify(ctx, "srtbox: "+a.Project+" wants to run", command+"\nin "+cwd); ans != "" {
+			body := command + "\nin " + cwd + "\n\n“Allow for session” allows " + scope + "."
+			if ans := a.Notify(ctx, "srtbox: "+a.Project+" wants to run", body); ans != "" {
 				answers <- ans
 			}
 		}()
@@ -121,10 +133,12 @@ func (a *Approver) Ask(program string, rule, argv []string, cwd string) (bool, s
 	case ans := <-answers:
 		switch ans {
 		case answerSession:
+			a.mu.Lock()
 			if a.granted == nil {
 				a.granted = map[string]bool{}
 			}
 			a.granted[key] = true
+			a.mu.Unlock()
 			return true, ""
 		case answerOnce:
 			return true, ""
@@ -147,11 +161,7 @@ func display(program string, argv []string) string {
 		}
 		parts = append(parts, a)
 	}
-	s := strings.Join(parts, " ")
-	if len(s) > 400 {
-		s = s[:400] + "…"
-	}
-	return s
+	return strings.Join(parts, " ")
 }
 
 // desktopNotify asks through notify-send on Linux and a dialog on macOS. It
@@ -226,7 +236,7 @@ func ApproveMain(args []string) int {
 			continue
 		}
 		asked++
-		fmt.Printf("%s wants to run:\n  %s\n  in %s\nAllow [o]nce, for this [s]ession, [d]eny, or Enter to skip: ", p.Project, p.Command, p.Cwd)
+		fmt.Printf("%s wants to run:\n  %s\n  in %s\nFor this session would allow %s.\nAllow [o]nce, for this [s]ession, [d]eny, or Enter to skip: ", p.Project, p.Command, p.Cwd, p.Scope)
 		line, _ := in.ReadString('\n')
 		var ans string
 		switch strings.ToLower(strings.TrimSpace(line)) {
