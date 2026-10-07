@@ -92,8 +92,14 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 	p = filepath.Clean(p)
 	fmt.Fprintln(w, p)
 
-	denyR, allowR := deepest(pol, "denyRead", p), deepest(pol, "allowRead", p)
-	allowW, denyW := deepest(pol, "allowWrite", p), deepest(pol, "denyWrite", p)
+	// The sandbox judges a path by where its links lead, so the rules are
+	// matched against that.
+	r := resolve(p)
+	if r != p {
+		line(w, "link", "->", r)
+	}
+	denyR, allowR := deepest(pol, "denyRead", r), deepest(pol, "allowRead", r)
+	allowW, denyW := deepest(pol, "allowWrite", r), deepest(pol, "denyWrite", r)
 	masked := denyR != "" && allowR == ""
 
 	info, statErr := os.Lstat(p)
@@ -152,6 +158,35 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 	default:
 		line(w, "write", "no", rule(pol, "allowWrite", allowW)+" covers it, but the write failed: "+writeErr.Error())
 	}
+}
+
+// resolve follows symbolic links along p one component at a time, reading
+// each link rather than its target, which may be unreadable here.
+func resolve(p string) string {
+	cur := "/"
+	parts := strings.Split(strings.TrimPrefix(p, "/"), "/")
+	for i, part := range parts {
+		next := filepath.Join(cur, part)
+		for hops := 0; hops < 40; hops++ {
+			fi, err := os.Lstat(next)
+			if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+				break
+			}
+			target, err := os.Readlink(next)
+			if err != nil {
+				break
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(next), target)
+			}
+			next = filepath.Clean(target)
+		}
+		if _, err := os.Lstat(next); err != nil {
+			return filepath.Join(append([]string{next}, parts[i+1:]...)...)
+		}
+		cur = next
+	}
+	return cur
 }
 
 func probeRead(p string, info os.FileInfo, statErr error) error {

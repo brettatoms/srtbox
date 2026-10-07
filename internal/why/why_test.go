@@ -124,3 +124,28 @@ func TestPathAndEnvExplanations(t *testing.T) {
 		}
 	}
 }
+
+func TestPathFollowsLinksToTheRuleThatApplies(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "cloud", ".claude")
+	os.MkdirAll(target, 0o755)
+	link := filepath.Join(dir, "home", ".claude")
+	os.MkdirAll(filepath.Dir(link), 0o755)
+	os.Symlink(target, link)
+	pol := &policy.Policy{OS: "linux", Settings: map[string]any{"filesystem": map[string]any{
+		"denyRead":  []any{filepath.Join(dir, "cloud")},
+		"allowRead": []any{filepath.Join(dir, "home")},
+	}}}
+	if got := resolve(filepath.Join(link, "settings.json")); got != filepath.Join(target, "settings.json") {
+		t.Fatalf("resolve = %s", got)
+	}
+	var b strings.Builder
+	Path(&b, pol, filepath.Join(link, "settings.json"))
+	if !strings.Contains(b.String(), "link:") || !strings.Contains(b.String(), "-> ") ||
+		!strings.Contains(b.String(), filepath.Join(target, "settings.json")) {
+		t.Errorf("no link line:\n%s", b.String())
+	}
+	if !strings.Contains(b.String(), `denyRead "`+filepath.Join(dir, "cloud")+`"`) {
+		t.Errorf("did not blame the rule on the link's target:\n%s", b.String())
+	}
+}

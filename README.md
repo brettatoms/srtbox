@@ -199,6 +199,33 @@ That suits API tokens sent as `Authorization: token …` or `Bearer …`, but no
 HTTP Basic auth, which base64-encodes the token first: git over HTTPS cannot
 authenticate with an injected token. Use `--ssh` for git.
 
+**Claude Code's own login.** On macOS Claude Code keeps its login in the
+keychain, which the sandbox cannot reach, so Claude inside is not logged in. On
+Linux it keeps it in `~/.claude/.credentials.json`, which any sandbox that can
+read `~/.claude` can read. On both, a long-lived token injected as a
+placeholder works instead:
+
+1. Run `claude setup-token` on the host and store the token it prints, for
+   example in the keychain (`security add-generic-password -a "$USER" -s
+   srtbox-claude-token -w`) or the desktop keyring (`secret-tool store
+   --label='srtbox claude token' service srtbox-claude-token`).
+2. Inject it, and on Linux hide the credentials file. `allowRead` wins over
+   `denyRead`, so `credentials.files` is the way to hide one file inside an
+   allowed directory:
+
+   ```json
+   "_inject": {
+     "CLAUDE_CODE_OAUTH_TOKEN": {
+       "from": "secret-tool lookup service srtbox-claude-token",
+       "hosts": ["api.anthropic.com"]
+     }
+   },
+   "credentials": {"files": [{"path": "~/.claude/.credentials.json", "mode": "deny"}]}
+   ```
+
+   On macOS, `from` is `security find-generic-password -a "$USER" -s
+   srtbox-claude-token -w`.
+
 On Linux the desktop keyring is reachable over the D-Bus session bus whenever
 `allowAllUnixSockets` is on. Deny the bus socket to close it, and inject what
 tools used to fetch from the keyring:
@@ -314,9 +341,6 @@ socket a project needs, such as Docker's, in `allowUnixSockets`.
 - With `allowAllUnixSockets`, the D-Bus session bus is reachable on Linux, and
   with it any secret stored in the desktop keyring, unless its socket is denied
   (see [Credentials](#credentials)).
-- On macOS, Go programs such as `gh` verify TLS with the system keychain and
-  ignore `SSL_CERT_FILE`, so an injected token reaches them only if the
-  session's CA is trusted there. Untested.
 - srt masks a denied home directory with a writable tmpfs, so a write there
   appears to succeed and is discarded when the command exits.
 

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -164,5 +165,31 @@ func TestProjectForPicksTheDeepestRoot(t *testing.T) {
 	}
 	if _, err := ProjectFor("/elsewhere"); err == nil {
 		t.Error("no error outside every root")
+	}
+}
+
+func TestFollowLinksAddsTargetsButNotPlantableOnes(t *testing.T) {
+	home := t.TempDir()
+	os.MkdirAll(filepath.Join(home, "cloud", ".claude"), 0o755)
+	os.Symlink(filepath.Join(home, "cloud", ".claude"), filepath.Join(home, ".claude"))
+	os.MkdirAll(filepath.Join(home, "proj"), 0o755)
+	os.MkdirAll(filepath.Join(home, "secret"), 0o755)
+	os.Symlink(filepath.Join(home, "secret"), filepath.Join(home, "proj", "planted"))
+
+	settings := map[string]any{"filesystem": map[string]any{
+		"allowRead":  []any{filepath.Join(home, ".claude"), filepath.Join(home, "proj", "planted")},
+		"allowWrite": []any{filepath.Join(home, "proj")},
+	}}
+	var warnings []string
+	FollowLinks(settings, func(m string) { warnings = append(warnings, m) })
+	reads := strs(get(settings, "filesystem", "allowRead"))
+	if !slices.Contains(reads, filepath.Join(home, "cloud", ".claude")) {
+		t.Errorf("link target not added: %v", reads)
+	}
+	if slices.Contains(reads, filepath.Join(home, "secret")) {
+		t.Errorf("followed a link inside a writable path: %v", reads)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "planted") {
+		t.Errorf("warnings %v", warnings)
 	}
 }

@@ -281,6 +281,70 @@ runbook. Do setup (section 0), then only these checks, and write
 - 11.4: Claude inside the sandbox, including whether the terminal output is
   garbled.
 
+## Third pass
+
+Do setup (section 0) first. Write `~/srtbox-test/results-3.md`. Steps marked
+**user** need an interactive terminal: ask the user to run them and report
+what they see.
+
+**T1. Keystroke injection (decides how srtbox handles terminals on macOS).**
+`allowPty` lets a sandboxed process control terminal devices. The question is
+whether it can then push keystrokes into the user's terminal with `TIOCSTI`,
+which the shell would run after the session ends. The payload is harmless and
+has no newline, so nothing runs. It only appears at the next prompt.
+
+Write the probe to `~/srtbox-test/proj/inject.py`:
+
+```python
+import fcntl, sys, termios
+try:
+    for c in b"echo INJECTED":
+        fcntl.ioctl(sys.stdin.fileno(), termios.TIOCSTI, bytes([c]))
+    print("ioctl succeeded")
+except OSError as e:
+    print("ioctl failed:", e)
+```
+
+| # | Step | Record |
+|---|---|---|
+| T1.1 | **user**: with `allowPty` absent from base.json, `srtbox run -- python3 inject.py` | the exit status and error, and whether `echo INJECTED` appears at the next shell prompt (clear it with Ctrl-C) |
+| T1.2 | **user**: add `"allowPty": true` at the top level of base.json, next to `network` and `filesystem`, and repeat | same. **Important:** text at the prompt means the sandbox can type into the user's shell |
+| T1.3 | **user**: with `allowPty` still true, `script -q /dev/null srtbox run -- python3 inject.py` | same. Here the sandbox has a private terminal from `script`, so text should *not* reach the user's prompt |
+| T1.4 | `script -q /dev/null srtbox run -- sh -c 'exit 7'; echo $?` | the exit status: does `script` pass `7` through |
+| T1.5 | **user**: with `allowPty` true, `srtbox run -p t -- claude`, then again as `script -q /dev/null srtbox run -p t -- claude` | whether the escape-sequence garbage from 11.4 is gone in each. Claude may still be not logged in until T3 |
+
+Remove `allowPty` afterwards.
+
+**T2. Symlinked allow paths.**
+
+```sh
+mkdir -p ~/srtbox-test/outside/real && echo hi > ~/srtbox-test/outside/real/f
+ln -s ~/srtbox-test/outside/real ~/srtbox-test/linked
+ln -s ~/srtbox-test/outside/real ~/srtbox-test/proj/planted
+```
+
+Add `"~/srtbox-test/linked"` and `"~/srtbox-test/proj/planted"` to
+`allowRead` in base.json.
+
+| # | Check | Expected |
+|---|---|---|
+| T2.1 | `srtbox run -- cat ~/srtbox-test/linked/f` | `hi`: srtbox also allows the link's target |
+| T2.2 | Launch output of T2.1 | a warning that `planted` is not followed because it sits in a writable path |
+| T2.3 | `srtbox run -- cat ~/srtbox-test/proj/planted/f` | fails |
+| T2.4 | `srtbox why ~/srtbox-test/proj/planted/f` | a `link: ->` line naming the target, and `denyRead "~"` as the reason |
+
+**T3. Claude's login through an injected token.**
+
+| # | Step | Expected |
+|---|---|---|
+| T3.1 | **user**: `claude setup-token`, then store the token with `security add-generic-password -a "$USER" -s srtbox-claude-token -w` (paste at the prompt) | stored; never print it |
+| T3.2 | Add to t.json: `"_inject": {"CLAUDE_CODE_OAUTH_TOKEN": {"from": "security find-generic-password -a \"$USER\" -s srtbox-claude-token -w", "hosts": ["api.anthropic.com"]}}`. Inside: `echo "${CLAUDE_CODE_OAUTH_TOKEN:0:8}"` | `fake_val` |
+| T3.3 | `srtbox run -- claude -p 'reply with the single word ok'` | `ok`. If it fails, record the exact error: Claude may reject the placeholder before sending it |
+| T3.4 | **user**: delete the stored token afterwards if they don't want to keep it (`security delete-generic-password -s srtbox-claude-token`) | |
+
+**T4. Version.** `srtbox version` prints a module version such as
+`v0.0.0-2026…-<commit>`, not `dev`.
+
 ## Results format
 
 Write `~/srtbox-test/results.md` (copy it somewhere outside `~/srtbox-test`

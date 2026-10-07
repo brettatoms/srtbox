@@ -52,6 +52,8 @@ func Build(project string) (config.Meta, map[string]any, error) {
 		config.AddEnvDeny(settings, deny...)
 	}
 
+	config.FollowLinks(settings, func(msg string) { fmt.Fprintln(os.Stderr, "srtbox: warning:", msg) })
+
 	// srt refuses settings that lack any of these lists, so a config can leave
 	// out the ones it has nothing to put in.
 	for _, k := range [][2]string{

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 
 	"github.com/brettatoms/srtbox/internal/broker"
 	"github.com/brettatoms/srtbox/internal/launch"
@@ -56,7 +57,7 @@ func run(args []string) int {
 		fmt.Print(usage)
 		return 0
 	case "version", "--version":
-		fmt.Println(version)
+		fmt.Println(buildVersion())
 		return 0
 	case "run":
 		return launch.Main(args[1:])
@@ -117,4 +118,16 @@ func whyMain(args []string) int {
 		return 1
 	}
 	return launch.Main(append(append(runArgs, "--", exe, "why"), args...))
+}
+
+// buildVersion is the release version, or for a `go install` build the
+// module version Go recorded.
+func buildVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return version
 }
