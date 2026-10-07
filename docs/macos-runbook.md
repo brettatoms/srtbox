@@ -118,6 +118,10 @@ From here on, run everything from `~/srtbox-test/proj` with:
 export SRTBOX_CONFIG_DIR=~/srtbox-test/config
 ```
 
+This applies to the **user** steps too, which run in the user's own shell.
+Without the variable, srtbox reports `no such project: t`. From outside the
+project, Claude exits with `error: An unknown error occurred (Unexpected)`.
+
 ## 1. Basics
 
 | # | Command | Expected |
@@ -339,7 +343,7 @@ Add `"~/srtbox-test/linked"` and `"~/srtbox-test/proj/planted"` to
 
 | # | Step | Expected |
 |---|---|---|
-| T3.1 | **user**: `claude setup-token`, then store the token with `security add-generic-password -a "$USER" -s srtbox-claude-token -w` (paste at the prompt) | stored; never print it |
+| T3.1 | **user**: `claude setup-token`, then store the token with `security add-generic-password -a "$USER" -s srtbox-claude-token -w` (paste at the prompt). `setup-token` can break the token across lines, and a copy of the visible text then gets a `401 Invalid bearer token`. Run it in a wide window and check that the copy is a single line starting with `sk-ant-oat01-` | stored; never print it |
 | T3.2 | Add to t.json: `"_inject": {"CLAUDE_CODE_OAUTH_TOKEN": {"from": "security find-generic-password -a \"$USER\" -s srtbox-claude-token -w", "hosts": ["api.anthropic.com"]}}`. Inside: `echo "${CLAUDE_CODE_OAUTH_TOKEN:0:8}"` | `fake_val` |
 | T3.3 | `srtbox run -- claude -p 'reply with the single word ok'` | `ok`. If it fails, record the exact error: Claude may reject the placeholder before sending it |
 | T3.4 | **user**: delete the stored token afterwards if they don't want to keep it (`security delete-generic-password -s srtbox-claude-token`) | |
@@ -354,10 +358,10 @@ Do setup (section 0), then write `~/srtbox-test/results-4.md`. Leave
 
 | # | Step | Expected |
 |---|---|---|
-| F1 | `srtbox show \| grep allowPty` | `"allowPty": true` |
+| F1 | `srtbox show t \| grep allowPty` | `"allowPty": true` |
 | F2 | **user**: `srtbox run -p t -- claude` | a clean screen, no escape-sequence garbage |
 | F3 | T2 from the third pass, with its fixed setup (the two links now have different targets) | T2.1 to T2.4 as listed |
-| F4 | **user**, on the host, outside any sandbox: `security find-generic-password -a "$USER" -s srtbox-claude-token -w \| wc -c` | the token's length only. Compare it with the token `claude setup-token` printed: a different length means extra text, such as spaces or quotes, was stored with it |
+| F4 | **user**, on the host, outside any sandbox: `security find-generic-password -a "$USER" -s srtbox-claude-token -w \| wc -c` | the token's length plus one, for the newline that `security -w` adds. Compare it with the token `claude setup-token` printed: a different length means the stored value isn't that token, or extra text, such as spaces or quotes, was stored with it |
 | F5 | **user**, on the host: `CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -a "$USER" -s srtbox-claude-token -w)" claude -p 'reply with the single word ok'` | `ok`. A 401 here means the stored token itself is bad: create a new one with `claude setup-token`, store it again, and repeat |
 | F6 | **user**, with the `_inject` entry from T3.2: `srtbox run -- sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $CLAUDE_CODE_OAUTH_TOKEN" -H "anthropic-version: 2023-06-01" -H "anthropic-beta: oauth-2025-04-20" https://api.anthropic.com/v1/models'` | `200` means srt swaps the token in. `401` with F5 passing means it does not reach this request |
 | F7 | **user**: `srtbox run -- claude -p 'reply with the single word ok'` | `ok` |
