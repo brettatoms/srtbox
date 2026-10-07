@@ -210,25 +210,6 @@ func serve(l net.Listener, port int) {
 	}
 }
 
-// HostportMain relays the given host loopback ports into the sandbox and
-// serves them until killed. Entries are port numbers or @portfile paths.
-func HostportMain(args []string) int {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: srtbox hostport <port|@portfile>...")
-		return 2
-	}
-	cwd, _ := os.Getwd()
-	r := NewRelays(args, cwd)
-	bound := r.Sync()
-	if len(bound) == 0 {
-		fmt.Fprintln(os.Stderr, "srtbox hostport: nothing on the host is serving those ports")
-		return 1
-	}
-	fmt.Fprintf(os.Stderr, "srtbox hostport: relaying %s\n", joinInts(bound))
-	r.Follow(RelayInterval)
-	return 0
-}
-
 // RelayInterval is how often relays re-check their ports.
 const RelayInterval = 2 * time.Second
 
@@ -257,12 +238,4 @@ func SSHProxyMain(args []string) int {
 	}
 	<-done
 	return 0
-}
-
-func joinInts(ns []int) string {
-	s := make([]string, len(ns))
-	for i, n := range ns {
-		s[i] = strconv.Itoa(n)
-	}
-	return strings.Join(s, ", ")
 }

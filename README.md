@@ -42,7 +42,6 @@ main.version=<tag>"` at the tag gives a byte-identical binary.
 srtbox run [-p <project>] [--ssh <host>] [--key <path>] [--] <command> [args...]
 srtbox list                       list configured projects
 srtbox show [<project>]           print the settings srt would receive
-srtbox hostport <port|@file>...   relay declared host loopback ports, from inside
 srtbox version
 ```
 

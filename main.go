@@ -19,7 +19,6 @@ Usage:
   srtbox run [-p <project>] [--ssh <host>] [--key <path>] [--] <command> [args...]
   srtbox list                       list configured projects
   srtbox show [<project>]           print the settings srt would receive
-  srtbox hostport <port|@file>...   relay host loopback ports (inside a sandbox)
   srtbox version
 
 Policy lives in $XDG_CONFIG_HOME/srtbox, by default ~/.config/srtbox:
@@ -64,8 +63,6 @@ func run(args []string) int {
 		return launch.Show(project)
 	case "init":
 		return sandbox.Init(args[1:])
-	case "hostport":
-		return netproxy.HostportMain(args[1:])
 	case "ssh-proxy":
 		return netproxy.SSHProxyMain(args[1:])
 	}
