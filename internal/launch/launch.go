@@ -114,6 +114,15 @@ func Main(args []string) int {
 
 	lb := scopeLoopback(meta.Forward, meta.Root, settings)
 
+	if len(meta.Inject) > 0 {
+		ienv, err := inject(meta.Inject, settings)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "srtbox:", err)
+			return 1
+		}
+		env = append(env, ienv...)
+	}
+
 	// The session directory is private to this launch and readable inside:
 	// it holds the policy for `srtbox why` and the broker's socket and links.
 	sess, err := os.MkdirTemp("", "srtbox-session-*")

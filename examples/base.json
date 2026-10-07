@@ -1,6 +1,9 @@
 {
   "_denyEnv": ["*TOKEN*", "*_KEY", "*_SECRET", "*PASSWORD*"],
   "_mkdir": ["${XDG_RUNTIME_DIR}/clojure-mcp-light"],
+  "_inject": {
+    "GH_TOKEN": {"from": "gh auth token", "hosts": ["api.github.com", "github.com", "uploads.github.com"]}
+  },
 
   "network": {
     "allowedDomains": [
@@ -15,7 +18,7 @@
   },
 
   "filesystem": {
-    "denyRead": ["~"],
+    "denyRead": ["~", "${XDG_RUNTIME_DIR}/bus", "${XDG_RUNTIME_DIR}/keyring"],
     "allowRead": ["~/.claude", "~/.claude.json", "~/.gitconfig", "~/.config/git", "~/.local/bin"],
     "allowWrite": ["/tmp", "~/.claude", "~/.claude.json", "${XDG_RUNTIME_DIR}/clojure-mcp-light"]
   }

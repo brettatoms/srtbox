@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -85,6 +87,7 @@ type Meta struct {
 	Mkdir    []string       // directories to create before launch, so srt can bind them
 	DenyEnv  []string       // variable-name patterns to withhold from the sandbox
 	AllowEnv []string       // exact variable names exempt from DenyEnv
+	Inject   map[string]any // variables fetched on the host and masked inside: name → {from, hosts}
 }
 
 // Load merges base.json (optional) with <project>.json.
@@ -223,6 +226,7 @@ func Split(doc map[string]any) (Meta, map[string]any) {
 		Broker:   obj(doc["_broker"]),
 		DenyEnv:  strs(doc["_denyEnv"]),
 		AllowEnv: strs(doc["_allowEnv"]),
+		Inject:   obj(doc["_inject"]),
 	}
 	for _, d := range strs(doc["_mkdir"]) {
 		m.Mkdir = append(m.Mkdir, Home(d))
@@ -274,6 +278,41 @@ func strs(v any) []string {
 		out = append(out, t)
 	}
 	return out
+}
+
+// Command accepts a command as a shell string or an argv array.
+func Command(v any) []string {
+	switch t := v.(type) {
+	case string:
+		if t == "" {
+			return nil
+		}
+		return []string{"sh", "-c", t}
+	case []any:
+		return strs(t)
+	}
+	return nil
+}
+
+// DomainMatch applies srt's allowlist pattern rules: an exact host,
+// "*.example.com" for subdomains only, "*" for everything, and an optional
+// ":port" suffix.
+func DomainMatch(host string, port int, pattern string) bool {
+	hp, pp := pattern, ""
+	if i := strings.LastIndex(pattern, ":"); i > 0 && !strings.HasSuffix(pattern, "]") && !strings.Contains(pattern[:i], ":") {
+		hp, pp = pattern[:i], pattern[i+1:]
+	}
+	if pp != "" && pp != strconv.Itoa(port) {
+		return false
+	}
+	h, hp := strings.ToLower(host), strings.ToLower(strings.Trim(hp, "[]"))
+	switch {
+	case hp == "*":
+		return true
+	case strings.HasPrefix(hp, "*."):
+		return net.ParseIP(h) == nil && strings.HasSuffix(h, hp[1:])
+	}
+	return h == hp
 }
 
 func obj(v any) map[string]any {

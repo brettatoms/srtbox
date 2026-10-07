@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brettatoms/srtbox/internal/config"
 	"github.com/brettatoms/srtbox/internal/policy"
 )
 
@@ -43,7 +44,7 @@ func TestDomainMatch(t *testing.T) {
 		{"::1", 80, "[::1]", true},
 	}
 	for _, c := range cases {
-		if got := domainMatch(c.host, c.port, c.pattern); got != c.want {
+		if got := config.DomainMatch(c.host, c.port, c.pattern); got != c.want {
 			t.Errorf("domainMatch(%s, %d, %s) = %v", c.host, c.port, c.pattern, got)
 		}
 	}

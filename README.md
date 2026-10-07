@@ -77,6 +77,7 @@ Keys starting with `_` are read by srtbox and never passed to srt:
 | `_mkdir` | Directories to create before launch. srt can only grant write access to a path that exists. |
 | `_denyEnv` | Variable-name patterns (`*TOKEN*`), matched case-insensitively against the launch environment, to withhold from the sandbox. |
 | `_allowEnv` | Exact variable names to pass through even when a `_denyEnv` pattern matches. Not patterns, and case-sensitive. |
+| `_inject` | Variables fetched on the host and given to the sandbox as placeholders. See [Credentials](#credentials). |
 
 [examples/](examples) has a starting `base.json` and project file. `srtbox
 show <project>` prints exactly what srt will receive, including what srtbox
@@ -165,6 +166,45 @@ discarded, and a write grant inside a re-opened read grant stays read-only.
 At launch srtbox records the session's merged policy, with each rule's source,
 in a private session directory that the sandbox can read.
 
+## Credentials
+
+A token in the sandbox's environment can be read and sent anywhere the sandbox
+can reach. `_inject` keeps the real value on the host:
+
+```json
+"_inject": {
+  "GH_TOKEN": {"from": "gh auth token", "hosts": ["api.github.com", "github.com", "uploads.github.com"]}
+}
+```
+
+At launch srtbox runs `from` on the host (a shell string or an argv array) and
+hands the value to srt as a masked credential. The sandbox sees a per-session
+placeholder; srt's proxy replaces it with the real value only in requests to
+`hosts`, which must be in `allowedDomains`. A command that fails leaves the
+variable out, with a warning.
+
+To see inside those requests srt terminates their TLS with a per-session CA,
+and points the sandbox's trust variables (`SSL_CERT_FILE`,
+`NODE_EXTRA_CA_CERTS` and others) at it. srtbox excludes every other allowed
+host from termination, so they keep end-to-end TLS. A wildcard entry that also
+covers an injection host, such as `*.github.com`, stays terminated.
+
+The placeholder is replaced where it appears literally, in a header or body.
+That suits API tokens sent as `Authorization: token …` or `Bearer …`, but not
+HTTP Basic auth, which base64-encodes the token first: git over HTTPS cannot
+authenticate with an injected token. Use `--ssh` for git.
+
+On Linux the desktop keyring is reachable over the D-Bus session bus whenever
+`allowAllUnixSockets` is on. Deny the bus socket to close it, and inject what
+tools used to fetch from the keyring:
+
+```json
+"filesystem": {"denyRead": ["${XDG_RUNTIME_DIR}/bus", "${XDG_RUNTIME_DIR}/keyring"]}
+```
+
+Anything inside that needs the session bus stops working, such as
+`notify-send` or `secret-tool`.
+
 ## Broker
 
 Some commands cannot work inside: a static binary with no route through the
@@ -251,7 +291,11 @@ setting.
   wrote that you later run yourself: a test, a build script, a package
   manifest. srtbox covers what runs without anyone choosing to run it.
 - With `allowAllUnixSockets`, the D-Bus session bus is reachable on Linux, and
-  with it any secret stored in the desktop keyring.
+  with it any secret stored in the desktop keyring, unless its socket is denied
+  (see [Credentials](#credentials)).
+- On macOS, Go programs such as `gh` verify TLS with the system keychain and
+  ignore `SSL_CERT_FILE`, so an injected token reaches them only if the
+  session's CA is trusted there. Untested.
 - srt masks a denied home directory with a writable tmpfs, so a write there
   appears to succeed and is discarded when the command exits.
 

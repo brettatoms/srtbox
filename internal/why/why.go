@@ -268,12 +268,12 @@ func Host(w io.Writer, pol *policy.Policy, arg string) {
 	}
 	var allowed, denied string
 	for _, d := range policy.Strings(pol.Settings, "network", "deniedDomains") {
-		if domainMatch(host, port, d) {
+		if config.DomainMatch(host, port, d) {
 			denied = d
 		}
 	}
 	for _, d := range policy.Strings(pol.Settings, "network", "allowedDomains") {
-		if domainMatch(host, port, d) && (allowed == "" || len(d) > len(allowed)) {
+		if config.DomainMatch(host, port, d) && (allowed == "" || len(d) > len(allowed)) {
 			allowed = d
 		}
 	}
@@ -345,26 +345,6 @@ func splitTarget(arg string) (string, int, error) {
 	return h, port, nil
 }
 
-// domainMatch applies srt's pattern rules: an exact host, "*.example.com"
-// for subdomains only, "*" for everything, and an optional ":port".
-func domainMatch(host string, port int, pattern string) bool {
-	hp, pp := pattern, ""
-	if i := strings.LastIndex(pattern, ":"); i > 0 && !strings.HasSuffix(pattern, "]") && !strings.Contains(pattern[:i], ":") {
-		hp, pp = pattern[:i], pattern[i+1:]
-	}
-	if pp != "" && pp != strconv.Itoa(port) {
-		return false
-	}
-	h, hp := strings.ToLower(host), strings.ToLower(strings.Trim(hp, "[]"))
-	switch {
-	case hp == "*":
-		return true
-	case strings.HasPrefix(hp, "*."):
-		return net.ParseIP(h) == nil && strings.HasSuffix(h, hp[1:])
-	}
-	return h == hp
-}
-
 func dialProbe(host string, port int) error {
 	done := make(chan error, 1)
 	go func() {
@@ -385,6 +365,19 @@ func dialProbe(host string, port int) error {
 // Env explains whether a variable reaches the sandbox.
 func Env(w io.Writer, pol *policy.Policy, name string) {
 	fmt.Fprintln(w, "$"+name)
+	if creds, ok := pol.Settings["credentials"].(map[string]any); ok {
+		vars, _ := creds["envVars"].([]any)
+		for _, v := range vars {
+			if m, ok := v.(map[string]any); ok && m["name"] == name && m["mode"] == "mask" {
+				var hosts []string
+				for _, h := range m["injectHosts"].([]any) {
+					hosts = append(hosts, fmt.Sprint(h))
+				}
+				line(w, "env", "masked", "the sandbox sees a placeholder; srt sends the real value only to "+strings.Join(hosts, ", "))
+				return
+			}
+		}
+	}
 	if _, ok := os.LookupEnv(name); ok {
 		line(w, "env", "set", "visible in the sandbox")
 		return

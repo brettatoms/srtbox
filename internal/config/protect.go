@@ -181,6 +181,29 @@ func AddEnvDeny(settings map[string]any, names ...string) {
 	creds["envVars"] = vars
 }
 
+// SetEnvMask records name as a masked credential: the sandbox sees a
+// placeholder, and srt's proxy substitutes the real value only on requests to
+// hosts. It replaces any deny entry for the same name.
+func SetEnvMask(settings map[string]any, name string, hosts []string) {
+	creds, _ := settings["credentials"].(map[string]any)
+	if creds == nil {
+		creds = map[string]any{}
+		settings["credentials"] = creds
+	}
+	vars, _ := creds["envVars"].([]any)
+	kept := vars[:0]
+	for _, v := range vars {
+		if m, ok := v.(map[string]any); !ok || m["name"] != name {
+			kept = append(kept, v)
+		}
+	}
+	h := make([]any, len(hosts))
+	for i, x := range hosts {
+		h[i] = x
+	}
+	creds["envVars"] = append(kept, map[string]any{"name": name, "mode": "mask", "injectHosts": h})
+}
+
 func exists(p string) bool { _, err := os.Lstat(p); return err == nil }
 
 func dedupe(s []string) []string {
