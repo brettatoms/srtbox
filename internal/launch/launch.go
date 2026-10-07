@@ -53,6 +53,7 @@ func Build(project string) (config.Meta, map[string]any, error) {
 	}
 
 	config.FollowLinks(settings, func(msg string) { fmt.Fprintln(os.Stderr, "srtbox: warning:", msg) })
+	allowTerminal(settings, runtime.GOOS)
 
 	// srt refuses settings that lack any of these lists, so a config can leave
 	// out the ones it has nothing to put in.
@@ -237,6 +238,17 @@ func Main(args []string) int {
 	}
 	cmd.Wait()
 	return sandbox.ExitCode(cmd.ProcessState)
+}
+
+// allowTerminal turns on srt's allowPty on macOS unless the config sets it.
+// Without it Seatbelt refuses the terminal controls a full-screen program
+// needs to read keys one at a time, and the terminal's replies to its
+// queries are echoed onto the screen. Keystroke injection into the user's
+// terminal (TIOCSTI) stays refused either way.
+func allowTerminal(settings map[string]any, goos string) {
+	if _, set := settings["allowPty"]; goos == "darwin" && !set {
+		settings["allowPty"] = true
+	}
 }
 
 // scopeUnixSockets limits Unix sockets on macOS to an allowlist: srtbox's own

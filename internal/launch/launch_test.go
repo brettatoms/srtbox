@@ -134,3 +134,21 @@ func TestScopeUnixSocketsOnMacOSOnly(t *testing.T) {
 		t.Error("changed Linux settings")
 	}
 }
+
+func TestAllowTerminalOnMacOSUnlessSet(t *testing.T) {
+	s := map[string]any{}
+	allowTerminal(s, "darwin")
+	if s["allowPty"] != true {
+		t.Error("allowPty not set on macOS")
+	}
+	s = map[string]any{"allowPty": false}
+	allowTerminal(s, "darwin")
+	if s["allowPty"] != false {
+		t.Error("overrode an explicit allowPty")
+	}
+	s = map[string]any{}
+	allowTerminal(s, "linux")
+	if _, ok := s["allowPty"]; ok {
+		t.Error("set allowPty on Linux")
+	}
+}

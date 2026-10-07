@@ -34,11 +34,12 @@ node --version; npm ls -g @anthropic-ai/sandbox-runtime
 ```
 
 Install srt and srtbox. `go install` fetches the Go toolchain srtbox pins if
-the local one is older.
+the local one is older. `GOPROXY=direct` skips the module proxy, whose
+`@latest` can lag the repository by a commit or more.
 
 ```sh
 npm install -g @anthropic-ai/sandbox-runtime
-go install github.com/brettatoms/srtbox@latest
+GOPROXY=direct go install github.com/brettatoms/srtbox@main
 export PATH="$(go env GOPATH)/bin:$PATH"
 srtbox version
 ```
@@ -318,9 +319,10 @@ Remove `allowPty` afterwards.
 **T2. Symlinked allow paths.**
 
 ```sh
-mkdir -p ~/srtbox-test/outside/real && echo hi > ~/srtbox-test/outside/real/f
+mkdir -p ~/srtbox-test/outside/real ~/srtbox-test/outside/secret
+echo hi > ~/srtbox-test/outside/real/f; echo secret > ~/srtbox-test/outside/secret/f
 ln -s ~/srtbox-test/outside/real ~/srtbox-test/linked
-ln -s ~/srtbox-test/outside/real ~/srtbox-test/proj/planted
+ln -s ~/srtbox-test/outside/secret ~/srtbox-test/proj/planted
 ```
 
 Add `"~/srtbox-test/linked"` and `"~/srtbox-test/proj/planted"` to
@@ -344,6 +346,21 @@ Add `"~/srtbox-test/linked"` and `"~/srtbox-test/proj/planted"` to
 
 **T4. Version.** `srtbox version` prints a module version such as
 `v0.0.0-2026…-<commit>`, not `dev`.
+
+## Fourth pass
+
+Do setup (section 0), then write `~/srtbox-test/results-4.md`. Leave
+`allowPty` out of every config: srtbox now turns it on for macOS itself.
+
+| # | Step | Expected |
+|---|---|---|
+| F1 | `srtbox show \| grep allowPty` | `"allowPty": true` |
+| F2 | **user**: `srtbox run -p t -- claude` | a clean screen, no escape-sequence garbage |
+| F3 | T2 from the third pass, with its fixed setup (the two links now have different targets) | T2.1 to T2.4 as listed |
+| F4 | **user**, on the host, outside any sandbox: `security find-generic-password -a "$USER" -s srtbox-claude-token -w \| wc -c` | the token's length only. Compare it with the token `claude setup-token` printed: a different length means extra text, such as spaces or quotes, was stored with it |
+| F5 | **user**, on the host: `CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -a "$USER" -s srtbox-claude-token -w)" claude -p 'reply with the single word ok'` | `ok`. A 401 here means the stored token itself is bad: create a new one with `claude setup-token`, store it again, and repeat |
+| F6 | **user**, with the `_inject` entry from T3.2: `srtbox run -- sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $CLAUDE_CODE_OAUTH_TOKEN" -H "anthropic-version: 2023-06-01" -H "anthropic-beta: oauth-2025-04-20" https://api.anthropic.com/v1/models'` | `200` means srt swaps the token in. `401` with F5 passing means it does not reach this request |
+| F7 | **user**: `srtbox run -- claude -p 'reply with the single word ok'` | `ok` |
 
 ## Results format
 

@@ -323,6 +323,11 @@ not just the `_forward` ones. Seatbelt fixes its rules at launch and srt has no
 per-port loopback setting, so srtbox cannot narrow it. Linux needs no such
 setting.
 
+On macOS srtbox turns on srt's `allowPty` unless the config sets it: without
+it Seatbelt refuses the terminal controls a full-screen program needs, and its
+screen fills with the terminal's replies. Keystroke injection into your
+terminal (`TIOCSTI`) is refused either way.
+
 On macOS srtbox also turns `allowAllUnixSockets` off and allows only its own
 sockets (the broker's and the `--ssh` agents') plus `allowUnixSockets`.
 Seatbelt lets a sandbox connect to a socket whose path it cannot read, so with
