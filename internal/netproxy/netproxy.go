@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -134,13 +136,40 @@ func ResolvePorts(entries []string, base string) []int {
 	return ports
 }
 
-// StartRelays binds the sandbox's loopback for each port the host is serving
-// and relays every connection there to the host's loopback. A port is bound
-// only when the host answers on it, so "connection refused" inside still means
-// "nothing is running there". It returns the ports bound.
-func StartRelays(ports []int) []int {
+// Relays keeps a relay on the sandbox's loopback for each declared port the
+// host is serving. Entries are port numbers or @portfile paths; Sync re-reads
+// the portfiles, so a REPL restarted on a new port is followed.
+type Relays struct {
+	entries []string
+	base    string
+	live    map[int]net.Listener
+}
+
+// NewRelays returns relays for entries, with relative portfiles read from base.
+func NewRelays(entries []string, base string) *Relays {
+	return &Relays{entries: entries, base: base, live: map[int]net.Listener{}}
+}
+
+// Sync closes the relays for ports no longer declared and starts one for each
+// declared port the host now answers on. A port is bound only once the host
+// serves it, so "connection refused" inside still means nothing is running
+// there. It returns the ports newly bound.
+func (r *Relays) Sync() []int {
+	want := map[int]bool{}
+	for _, p := range ResolvePorts(r.entries, r.base) {
+		want[p] = true
+	}
+	for p, l := range r.live {
+		if !want[p] {
+			l.Close()
+			delete(r.live, p)
+		}
+	}
 	var bound []int
-	for _, port := range ports {
+	for _, port := range slices.Sorted(maps.Keys(want)) {
+		if r.live[port] != nil {
+			continue
+		}
 		probe, err := Dial("127.0.0.1", port)
 		if err != nil {
 			continue
@@ -150,25 +179,35 @@ func StartRelays(ports []int) []int {
 		if err != nil {
 			continue
 		}
+		r.live[port] = l
+		go serve(l, port)
 		bound = append(bound, port)
-		go func(l net.Listener, port int) {
-			for {
-				c, err := l.Accept()
-				if err != nil {
-					return
-				}
-				go func(c net.Conn) {
-					up, err := Dial("127.0.0.1", port)
-					if err != nil {
-						c.Close()
-						return
-					}
-					splice(c, up)
-				}(c)
-			}
-		}(l, port)
 	}
 	return bound
+}
+
+// Follow calls Sync every interval, for the life of the process.
+func (r *Relays) Follow(interval time.Duration) {
+	for range time.Tick(interval) {
+		r.Sync()
+	}
+}
+
+func serve(l net.Listener, port int) {
+	for {
+		c, err := l.Accept()
+		if err != nil {
+			return
+		}
+		go func(c net.Conn) {
+			up, err := Dial("127.0.0.1", port)
+			if err != nil {
+				c.Close()
+				return
+			}
+			splice(c, up)
+		}(c)
+	}
 }
 
 // HostportMain relays the given host loopback ports into the sandbox and
@@ -179,14 +218,19 @@ func HostportMain(args []string) int {
 		return 2
 	}
 	cwd, _ := os.Getwd()
-	bound := StartRelays(ResolvePorts(args, cwd))
+	r := NewRelays(args, cwd)
+	bound := r.Sync()
 	if len(bound) == 0 {
 		fmt.Fprintln(os.Stderr, "srtbox hostport: nothing on the host is serving those ports")
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, "srtbox hostport: relaying %s\n", joinInts(bound))
-	select {}
+	r.Follow(RelayInterval)
+	return 0
 }
+
+// RelayInterval is how often relays re-check their ports.
+const RelayInterval = 2 * time.Second
 
 // SSHProxyMain is an ssh ProxyCommand: it connects stdio to host:port through
 // the proxy, because the sandbox has no route to port 22 of its own.

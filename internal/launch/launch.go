@@ -114,6 +114,8 @@ func Main(args []string) int {
 		env = append(env, s.env...)
 	}
 
+	lb := scopeLoopback(meta.Forward, meta.Root, settings)
+
 	if len(meta.Broker) > 0 {
 		runBroker(meta.Broker)
 	}
@@ -140,9 +142,24 @@ func Main(args []string) int {
 		return 1
 	}
 
-	cmd := exec.Command(srt, append([]string{"--settings", f.Name(), "--", exe, "init", "--"}, cmdArgs...)...)
+	// When a forwarded port can move, srt reads allowlist updates from a pipe
+	// it inherits as fd 3, and srtbox keeps the write end.
+	srtArgs := []string{"--settings", f.Name()}
+	var controlR, controlW *os.File
+	if lb.follows() {
+		if controlR, controlW, err = os.Pipe(); err != nil {
+			fmt.Fprintln(os.Stderr, "srtbox:", err)
+			return 1
+		}
+		cleanup = append(cleanup, func() { controlW.Close() })
+		srtArgs = append(srtArgs, "--control-fd", "3")
+	}
+	cmd := exec.Command(srt, append(append(srtArgs, "--", exe, "init", "--"), cmdArgs...)...)
 	cmd.Env = env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if controlR != nil {
+		cmd.ExtraFiles = []*os.File{controlR}
+	}
 
 	// The terminal delivers SIGINT and SIGQUIT to srt as well as to srtbox, so
 	// those are only caught here — srtbox must outlive srt to clean up. TERM
@@ -160,6 +177,12 @@ func Main(args []string) int {
 			}
 		}
 	}()
+	if controlR != nil {
+		controlR.Close()
+		stop := make(chan struct{})
+		defer close(stop)
+		go lb.follow(controlW, portfileInterval, stop)
+	}
 	cmd.Wait()
 	return sandbox.ExitCode(cmd.ProcessState)
 }
@@ -172,11 +195,12 @@ func Show(project string) int {
 		fmt.Fprintln(os.Stderr, "srtbox:", err)
 		return 1
 	}
-	_, settings, err := Build(project)
+	meta, settings, err := Build(project)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "srtbox:", err)
 		return 1
 	}
+	scopeLoopback(meta.Forward, meta.Root, settings)
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	enc.Encode(settings)

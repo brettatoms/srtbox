@@ -3,7 +3,7 @@
   "_forward": ["3000", "@.nrepl-port"],
 
   "network": {
-    "allowedDomains": ["api.stripe.com", "127.0.0.1", "[::1]"]
+    "allowedDomains": ["api.stripe.com"]
   },
 
   "filesystem": {

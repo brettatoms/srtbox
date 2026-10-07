@@ -42,7 +42,7 @@ main.version=<tag>"` at the tag gives a byte-identical binary.
 srtbox run [-p <project>] [--ssh <host>] [--key <path>] [--] <command> [args...]
 srtbox list                       list configured projects
 srtbox show [<project>]           print the settings srt would receive
-srtbox hostport <port|@file>...   relay host loopback ports, from inside
+srtbox hostport <port|@file>...   relay declared host loopback ports, from inside
 srtbox version
 ```
 
@@ -116,16 +116,21 @@ The command runs under `srtbox init`, which:
 
 - relays the `_forward` ports from the host's loopback. On Linux the sandbox has
   its own network namespace, so the host's dev servers and REPLs are otherwise
-  invisible. A port is relayed only if the host is serving it at launch, so
-  "connection refused" inside still means nothing is running; for a server
-  started later, run `srtbox hostport <port>` inside.
+  invisible. A port is relayed once the host is serving it, so "connection
+  refused" inside still means nothing is running there, and a server started
+  later is picked up within a few seconds. An `@file` entry is re-read the same
+  way, so a REPL restarted on a new port stays reachable.
 - relays terminal resizes. srt starts the sandbox in a new session on Linux, so
   the kernel never delivers `SIGWINCH` inside and full-screen programs keep
   drawing at their starting size.
 - passes termination signals on and reports a signal death as `128+N`.
 
-Relays go through srt's own proxy using HTTP CONNECT, which carries any TCP. The
-target still has to be allowed: the example project allows `127.0.0.1`.
+Relays go through srt's own proxy using HTTP CONNECT, which carries any TCP.
+srtbox allows `127.0.0.1:<port>` for each `_forward` port and nothing else on
+the host's loopback, so leave bare `127.0.0.1` and `localhost` out of
+`allowedDomains`: either would open every host port, databases and daemons
+included. When an `@file` port changes, srtbox sends srt the new allowlist over
+its control channel (`--control-fd`) and drops the old port.
 
 ## SSH
 
@@ -152,6 +157,12 @@ Linux and macOS. srt uses bubblewrap on Linux and Seatbelt on macOS, and the
 two differ in ways srtbox accounts for: on macOS the sandbox shares the host's
 loopback and stays attached to the terminal, so `init` does not relay ports or
 resizes there.
+
+On macOS a host dev server or REPL is reachable only with
+`"allowLocalBinding": true` in `network`, and that opens every loopback port,
+not just the `_forward` ones. Seatbelt fixes its rules at launch and srt has no
+per-port loopback setting, so srtbox cannot narrow it. Linux needs no such
+setting.
 
 ## Limits
 

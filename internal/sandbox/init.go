@@ -17,7 +17,7 @@ import (
 // outside, then runs the command:
 //
 //   - relays declared host loopback ports in, on Linux, where the sandbox has
-//     its own network namespace
+//     its own network namespace, following ports that start or move later
 //   - relays terminal resizes, on Linux, where srt's bwrap --new-session means
 //     the kernel never delivers SIGWINCH inside
 //   - restores GIT_SSH_COMMAND for --ssh, which srt overwrites with its own
@@ -36,18 +36,23 @@ func Init(args []string) int {
 		os.Setenv("GIT_SSH_COMMAND", v)
 	}
 
-	relays := 0
+	// Relays keep following their ports for the whole session, so Init stays
+	// the command's parent whenever any are declared. Ports bound later are
+	// not announced: the command owns the terminal by then.
+	var entries []string
 	if runtime.GOOS == "linux" {
-		var entries []string
 		json.Unmarshal([]byte(os.Getenv("SRTBOX_FORWARD")), &entries)
-		if bound := netproxy.StartRelays(netproxy.ResolvePorts(entries, os.Getenv("SRTBOX_ROOT"))); len(bound) > 0 {
-			relays = len(bound)
+	}
+	if len(entries) > 0 {
+		r := netproxy.NewRelays(entries, os.Getenv("SRTBOX_ROOT"))
+		if bound := r.Sync(); len(bound) > 0 {
 			fmt.Fprintf(os.Stderr, "srtbox: relaying host ports %v\n", bound)
 		}
+		go r.Follow(netproxy.RelayInterval)
 	}
 	tty := resizeTTY()
 
-	if relays == 0 && tty < 0 {
+	if len(entries) == 0 && tty < 0 {
 		path, err := exec.LookPath(args[0])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "srtbox:", err)

@@ -3,12 +3,15 @@ package netproxy
 import (
 	"bufio"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -99,4 +102,96 @@ func contains(s []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// echoProxy accepts any number of CONNECTs. It refuses ports for which serving
+// reports false, and otherwise echoes, standing in for the host's server.
+func echoProxy(t *testing.T, serving func(port int) bool) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				br := bufio.NewReader(c)
+				first, _ := br.ReadString('\n')
+				for {
+					line, _ := br.ReadString('\n')
+					if line == "\r\n" || line == "" {
+						break
+					}
+				}
+				var port int
+				fmt.Sscanf(first, "CONNECT 127.0.0.1:%d", &port)
+				if !serving(port) {
+					io.WriteString(c, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
+					return
+				}
+				io.WriteString(c, "HTTP/1.1 200 Connection Established\r\n\r\n")
+				io.Copy(c, br)
+			}(c)
+		}
+	}()
+	return l.Addr().String()
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+func echoes(t *testing.T, port int) bool {
+	t.Helper()
+	c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		return false
+	}
+	defer c.Close()
+	io.WriteString(c, "ping")
+	buf := make([]byte, 4)
+	_, err = io.ReadFull(c, buf)
+	return err == nil && string(buf) == "ping"
+}
+
+func TestRelaysFollowServingAndPortfileChanges(t *testing.T) {
+	a, b := freePort(t), freePort(t)
+	var mu sync.Mutex
+	up := map[int]bool{}
+	setUp := func(p int) { mu.Lock(); up[p] = true; mu.Unlock() }
+	t.Setenv("HTTP_PROXY", "http://"+echoProxy(t, func(p int) bool { mu.Lock(); defer mu.Unlock(); return up[p] }))
+
+	dir := t.TempDir()
+	portfile := filepath.Join(dir, ".nrepl-port")
+	os.WriteFile(portfile, []byte(strconv.Itoa(a)), 0o644)
+	r := NewRelays([]string{"@.nrepl-port"}, dir)
+
+	if got := r.Sync(); len(got) != 0 {
+		t.Fatalf("bound %v before the host served it", got)
+	}
+	setUp(a)
+	if got := r.Sync(); !reflect.DeepEqual(got, []int{a}) || !echoes(t, a) {
+		t.Fatalf("not relaying %d once served: %v", a, got)
+	}
+
+	os.WriteFile(portfile, []byte(strconv.Itoa(b)), 0o644)
+	setUp(b)
+	if got := r.Sync(); !reflect.DeepEqual(got, []int{b}) || !echoes(t, b) {
+		t.Fatalf("did not follow the portfile to %d: %v", b, got)
+	}
+	if echoes(t, a) {
+		t.Errorf("still relaying %d after the portfile moved", a)
+	}
 }
