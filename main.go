@@ -16,20 +16,20 @@ var version = "dev"
 const usage = `srtbox runs a command in an srt sandbox under a per-project policy.
 
 Usage:
-  srtbox <project> [--ssh <host>] [--key <path>] [--] <command> [args...]
-  srtbox --list                     list configured projects
-  srtbox --show <project>           print the settings srt would receive
+  srtbox run [-p <project>] [--ssh <host>] [--key <path>] [--] <command> [args...]
+  srtbox list                       list configured projects
+  srtbox show [<project>]           print the settings srt would receive
   srtbox hostport <port|@file>...   relay host loopback ports (inside a sandbox)
   srtbox version
 
 Policy lives in $XDG_CONFIG_HOME/srtbox, by default ~/.config/srtbox:
 base.json applies to every project, and <project>.json overlays it.
+Without -p, run and show use the project whose _root contains the working
+directory.
 
 --ssh opens one host for the session through a throwaway ssh-agent holding
 only that host's key. Without it there is no SSH: the login agent is withheld.
 Inside, use: ssh -F "$SRTBOX_SSH_CONFIG" <host>. git picks it up on its own.
-
-Reserved names, not usable as projects: hostport, init, ssh-proxy, version.
 `
 
 func main() {
@@ -48,14 +48,20 @@ func run(args []string) int {
 	case "version", "--version":
 		fmt.Println(version)
 		return 0
-	case "-l", "--list":
+	case "run":
+		return launch.Main(args[1:])
+	case "list":
 		return launch.List()
-	case "-s", "--show":
-		if len(args) != 2 {
-			fmt.Fprintln(os.Stderr, "usage: srtbox --show <project>")
+	case "show":
+		if len(args) > 2 {
+			fmt.Fprintln(os.Stderr, "usage: srtbox show [<project>]")
 			return 2
 		}
-		return launch.Show(args[1])
+		project := ""
+		if len(args) == 2 {
+			project = args[1]
+		}
+		return launch.Show(project)
 	case "init":
 		return sandbox.Init(args[1:])
 	case "hostport":
@@ -63,5 +69,6 @@ func run(args []string) int {
 	case "ssh-proxy":
 		return netproxy.SSHProxyMain(args[1:])
 	}
-	return launch.Main(args)
+	fmt.Fprintf(os.Stderr, "srtbox: unknown command %q\n\n%s", args[0], usage)
+	return 2
 }

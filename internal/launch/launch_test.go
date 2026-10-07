@@ -16,21 +16,22 @@ func TestParseArgs(t *testing.T) {
 		cmd     []string
 		wantErr bool
 	}{
-		{[]string{"p", "claude"}, "p", "", []string{"claude"}, false},
-		{[]string{"p", "--", "claude", "-x"}, "p", "", []string{"claude", "-x"}, false},
-		{[]string{"p", "--ssh", "h", "--", "claude"}, "p", "h", []string{"claude"}, false},
-		{[]string{"p", "--", "--ssh", "h"}, "p", "", []string{"--ssh", "h"}, false},
-		{[]string{"p", "--ssh"}, "", "", nil, true},
-		{[]string{"p"}, "", "", nil, true},
+		{[]string{"claude"}, "", "", []string{"claude"}, false},
+		{[]string{"-p", "p", "claude"}, "p", "", []string{"claude"}, false},
+		{[]string{"--project", "p", "--", "claude", "-x"}, "p", "", []string{"claude", "-x"}, false},
+		{[]string{"--ssh", "h", "-p", "p", "--", "claude"}, "p", "h", []string{"claude"}, false},
+		{[]string{"--", "-p", "p"}, "", "", []string{"-p", "p"}, false},
+		{[]string{"-p"}, "", "", nil, true},
+		{[]string{"-p", "p"}, "", "", nil, true},
 	}
 	for _, c := range cases {
-		project, o, cmd, err := parseArgs(c.args)
+		o, cmd, err := parseArgs(c.args)
 		if (err != nil) != c.wantErr {
 			t.Errorf("%v: err %v", c.args, err)
 			continue
 		}
-		if !c.wantErr && (project != c.project || o.sshHost != c.host || !reflect.DeepEqual(cmd, c.cmd)) {
-			t.Errorf("%v: got %q %q %q", c.args, project, o.sshHost, cmd)
+		if !c.wantErr && (o.project != c.project || o.sshHost != c.host || !reflect.DeepEqual(cmd, c.cmd)) {
+			t.Errorf("%v: got %q %q %q", c.args, o.project, o.sshHost, cmd)
 		}
 	}
 }
@@ -42,14 +43,6 @@ func TestParseSSHConfig(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cfg["identityfile"], []string{"~/.ssh/a", "~/.ssh/b"}) {
 		t.Errorf("identityfile: %v", cfg["identityfile"])
-	}
-}
-
-func TestWithin(t *testing.T) {
-	for path, want := range map[string]bool{"/a/b": true, "/a/b/c": true, "/a": false, "/a/bc": false} {
-		if got := within(path, "/a/b"); got != want {
-			t.Errorf("within(%q): %v", path, got)
-		}
 	}
 }
 

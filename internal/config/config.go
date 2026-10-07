@@ -44,6 +44,39 @@ func Projects() ([]string, error) {
 	return names, nil
 }
 
+// ProjectFor returns the project whose _root contains dir. When roots nest,
+// the deepest one wins.
+func ProjectFor(dir string) (string, error) {
+	names, err := Projects()
+	if err != nil {
+		return "", err
+	}
+	best, bestRoot := "", ""
+	for _, n := range names {
+		doc, err := Load(n)
+		if err != nil {
+			return "", err
+		}
+		m, _ := Split(Expand(doc, os.LookupEnv).(map[string]any))
+		if m.Root == "" || !Within(dir, m.Root) {
+			continue
+		}
+		if len(m.Root) > len(bestRoot) {
+			best, bestRoot = n, m.Root
+		}
+	}
+	if best == "" {
+		return "", fmt.Errorf("no project's _root contains %s; pass -p <project>", dir)
+	}
+	return best, nil
+}
+
+// Within reports whether path is root or below it.
+func Within(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
+}
+
 // Meta holds the "_" keys: settings srtbox acts on, never passed to srt.
 type Meta struct {
 	Root    string   // the project tree; protected repos are found under it

@@ -60,12 +60,19 @@ func Build(project string) (config.Meta, map[string]any, error) {
 	return meta, settings, nil
 }
 
-// Main launches a command for a project: srtbox <project> [flags] -- cmd...
+// Main launches a command: srtbox run [-p project] [flags] [--] cmd...
+// Without -p, the project is the one whose _root contains the working
+// directory.
 func Main(args []string) int {
-	project, opts, cmdArgs, err := parseArgs(args)
+	opts, cmdArgs, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "srtbox:", err)
 		return 2
+	}
+	project, err := resolveProject(opts.project)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "srtbox:", err)
+		return 1
 	}
 	meta, settings, err := Build(project)
 	if err != nil {
@@ -73,7 +80,7 @@ func Main(args []string) int {
 		return 1
 	}
 	if meta.Root != "" {
-		if cwd, _ := os.Getwd(); !within(cwd, meta.Root) {
+		if cwd, _ := os.Getwd(); !config.Within(cwd, meta.Root) {
 			fmt.Fprintf(os.Stderr, "srtbox: warning: cwd is outside %s; the sandbox grants that tree, not this one\n", meta.Root)
 		}
 	}
@@ -157,8 +164,14 @@ func Main(args []string) int {
 	return sandbox.ExitCode(cmd.ProcessState)
 }
 
-// Show prints the settings srt would receive for project.
+// Show prints the settings srt would receive for project, or for the
+// working directory's project when project is empty.
 func Show(project string) int {
+	project, err := resolveProject(project)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "srtbox:", err)
+		return 1
+	}
 	_, settings, err := Build(project)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "srtbox:", err)
@@ -183,23 +196,23 @@ func List() int {
 	return 0
 }
 
-type options struct{ sshHost, sshKey string }
+type options struct{ project, sshHost, sshKey string }
 
-func parseArgs(args []string) (string, options, []string, error) {
+func parseArgs(args []string) (options, []string, error) {
 	var o options
-	if len(args) == 0 {
-		return "", o, nil, errors.New("no project given")
-	}
-	project, rest := args[0], args[1:]
+	rest := args
 	for len(rest) > 0 {
 		switch rest[0] {
-		case "--ssh", "--key":
+		case "-p", "--project", "--ssh", "--key":
 			if len(rest) < 2 {
-				return "", o, nil, fmt.Errorf("%s needs a value", rest[0])
+				return o, nil, fmt.Errorf("%s needs a value", rest[0])
 			}
-			if rest[0] == "--ssh" {
+			switch rest[0] {
+			case "-p", "--project":
+				o.project = rest[1]
+			case "--ssh":
 				o.sshHost = rest[1]
-			} else {
+			default:
 				o.sshKey = config.Home(rest[1])
 			}
 			rest = rest[2:]
@@ -210,9 +223,20 @@ func parseArgs(args []string) (string, options, []string, error) {
 		break
 	}
 	if len(rest) == 0 {
-		return "", o, nil, errors.New("no command given")
+		return o, nil, errors.New("no command given")
 	}
-	return project, o, rest, nil
+	return o, rest, nil
+}
+
+func resolveProject(project string) (string, error) {
+	if project != "" {
+		return project, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return config.ProjectFor(cwd)
 }
 
 // runBroker runs the project's broker command and waits for it. The command
@@ -235,11 +259,6 @@ func self() (string, error) {
 		return "", err
 	}
 	return filepath.EvalSymlinks(exe)
-}
-
-func within(path, root string) bool {
-	rel, err := filepath.Rel(root, path)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 }
 
 func jsonString(v any) string {

@@ -112,3 +112,30 @@ func TestAddEnvDenyIsIdempotent(t *testing.T) {
 		t.Fatalf("got %d entries", n)
 	}
 }
+
+func TestWithin(t *testing.T) {
+	for path, want := range map[string]bool{"/a/b": true, "/a/b/c": true, "/a": false, "/a/bc": false} {
+		if got := Within(path, "/a/b"); got != want {
+			t.Errorf("Within(%q): %v", path, got)
+		}
+	}
+}
+
+func TestProjectForPicksTheDeepestRoot(t *testing.T) {
+	conf := t.TempDir()
+	t.Setenv("SRTBOX_CONFIG_DIR", conf)
+	t.Setenv("SRTBOX_TEST_ROOT", "/w")
+	os.WriteFile(filepath.Join(conf, "base.json"), []byte(`{}`), 0o600)
+	os.WriteFile(filepath.Join(conf, "outer.json"), []byte(`{"_root":"${SRTBOX_TEST_ROOT}"}`), 0o600)
+	os.WriteFile(filepath.Join(conf, "inner.json"), []byte(`{"_root":"/w/inner"}`), 0o600)
+	os.WriteFile(filepath.Join(conf, "rootless.json"), []byte(`{}`), 0o600)
+
+	for dir, want := range map[string]string{"/w": "outer", "/w/x": "outer", "/w/inner/y": "inner"} {
+		if got, err := ProjectFor(dir); err != nil || got != want {
+			t.Errorf("ProjectFor(%q) = %q, %v; want %q", dir, got, err, want)
+		}
+	}
+	if _, err := ProjectFor("/elsewhere"); err == nil {
+		t.Error("no error outside every root")
+	}
+}

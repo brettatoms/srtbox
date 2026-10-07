@@ -7,7 +7,7 @@ needs around that: layered config, protection for nested git repos, withheld
 credentials, access to host dev servers, terminal resizing, and scoped SSH.
 
 ```
-srtbox myproject claude
+cd ~/src/myproject && srtbox run claude
 ```
 
 ## Install
@@ -39,12 +39,15 @@ main.version=<tag>"` at the tag gives a byte-identical binary.
 ## Usage
 
 ```
-srtbox <project> [--ssh <host>] [--key <path>] [--] <command> [args...]
-srtbox --list                     list configured projects
-srtbox --show <project>           print the settings srt would receive
+srtbox run [-p <project>] [--ssh <host>] [--key <path>] [--] <command> [args...]
+srtbox list                       list configured projects
+srtbox show [<project>]           print the settings srt would receive
 srtbox hostport <port|@file>...   relay host loopback ports, from inside
 srtbox version
 ```
+
+Without `-p`, `run` and `show` use the project whose `_root` contains the
+working directory, the deepest one if roots nest.
 
 ## Configuration
 
@@ -67,7 +70,7 @@ Keys starting with `_` are read by srtbox and never passed to srt:
 
 | Key | Meaning |
 |---|---|
-| `_root` | The project tree. Nested repos are found under it, and srtbox warns when launched outside it. |
+| `_root` | The project tree. `run` picks the project from it when `-p` is omitted, nested repos are found under it, and srtbox warns when launched outside it. |
 | `_forward` | Host loopback ports to relay in: `"3000"`, or `"@path"` for a file holding a port number, relative to `_root`, such as `.nrepl-port`. |
 | `_broker` | A command, string or array, run before launch to make sure a host-side broker is up. It owns its socket and lifetime, and returns once the broker is ready. |
 | `_mkdir` | Directories to create before launch. srt can only grant write access to a path that exists. |
@@ -121,7 +124,7 @@ target still has to be allowed: the example project allows `127.0.0.1`.
 There is no SSH inside by default. `--ssh <host>` opens one host for the session:
 
 ```
-srtbox myproject --ssh build-box claude
+srtbox run --ssh build-box claude
 ssh -F "$SRTBOX_SSH_CONFIG" build-box       # inside
 ```
 
