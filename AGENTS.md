@@ -17,16 +17,19 @@ examples only.
 ## One binary, two roles
 
 srtbox is the launcher on the host and the sandbox's first process inside it
-(`srtbox init`).
+(`srtbox init`). Inside, it also runs as the broker client when invoked under a
+brokered program's name.
 
 | Package | Runs |
 |---|---|
 | `internal/config`, `internal/launch` | host |
 | `internal/sandbox`, `internal/netproxy` | inside the sandbox |
+| `internal/broker` | both: the server on the host, `ClientMain` inside |
 
 The launcher hands state to `srtbox init` through `SRTBOX_*` environment
 variables. Code that runs inside has no host loopback and reaches the network
-only through `$HTTP_PROXY`.
+only through `$HTTP_PROXY`. Anything the sandbox sends the broker is untrusted
+input to code running unsandboxed on the host.
 
 ## srt behaviour the code relies on
 

@@ -40,10 +40,10 @@ func TestExpandDropsArrayEntriesWithUnsetVars(t *testing.T) {
 
 func TestSplitStripsMetaAtEveryDepth(t *testing.T) {
 	meta, settings := Split(decode(t, `{
-		"_root": "/proj", "_forward": ["3020", "@.nrepl-port"], "_broker": "x --ensure",
+		"_root": "/proj", "_forward": ["3020", "@.nrepl-port"], "_broker": {"bz": {"host": [["aws", "logs"]]}},
 		"_denyEnv": ["*TOKEN*"], "_mkdir": ["/tmp/a"],
 		"network": {"_comment": "gone", "allowedDomains": ["a"]}}`))
-	if meta.Root != "/proj" || len(meta.Forward) != 2 || meta.Broker[2] != "x --ensure" ||
+	if meta.Root != "/proj" || len(meta.Forward) != 2 || meta.Broker["bz"] == nil ||
 		meta.DenyEnv[0] != "*TOKEN*" || meta.Mkdir[0] != "/tmp/a" {
 		t.Fatalf("meta: %+v", meta)
 	}

@@ -79,12 +79,12 @@ func Within(path, root string) bool {
 
 // Meta holds the "_" keys: settings srtbox acts on, never passed to srt.
 type Meta struct {
-	Root     string   // the project tree; protected repos are found under it
-	Forward  []string // host loopback ports to relay in: "3020", or "@path/to/portfile"
-	Broker   []string // command that ensures the project's host-side broker is running
-	Mkdir    []string // directories to create before launch, so srt can bind them
-	DenyEnv  []string // variable-name patterns to withhold from the sandbox
-	AllowEnv []string // exact variable names exempt from DenyEnv
+	Root     string         // the project tree; protected repos are found under it
+	Forward  []string       // host loopback ports to relay in: "3020", or "@path/to/portfile"
+	Broker   map[string]any // brokered programs: name → rules, read by package broker
+	Mkdir    []string       // directories to create before launch, so srt can bind them
+	DenyEnv  []string       // variable-name patterns to withhold from the sandbox
+	AllowEnv []string       // exact variable names exempt from DenyEnv
 }
 
 // Load merges base.json (optional) with <project>.json.
@@ -211,7 +211,7 @@ func Split(doc map[string]any) (Meta, map[string]any) {
 	m := Meta{
 		Root:     Home(str(doc["_root"])),
 		Forward:  strs(doc["_forward"]),
-		Broker:   cmd(doc["_broker"]),
+		Broker:   obj(doc["_broker"]),
 		DenyEnv:  strs(doc["_denyEnv"]),
 		AllowEnv: strs(doc["_allowEnv"]),
 	}
@@ -267,18 +267,9 @@ func strs(v any) []string {
 	return out
 }
 
-// cmd accepts a command as a shell string or an argv array.
-func cmd(v any) []string {
-	switch t := v.(type) {
-	case string:
-		if t == "" {
-			return nil
-		}
-		return []string{"sh", "-c", t}
-	case []any:
-		return strs(t)
-	}
-	return nil
+func obj(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
 }
 
 // Append adds values to a string array at path (e.g. "filesystem", "denyWrite"),

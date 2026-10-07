@@ -42,6 +42,7 @@ main.version=<tag>"` at the tag gives a byte-identical binary.
 srtbox run [-p <project>] [--ssh <host>] [--key <path>] [--] <command> [args...]
 srtbox list                       list configured projects
 srtbox show [<project>]           print the settings srt would receive
+srtbox approve                    answer brokered commands waiting for approval
 srtbox version
 ```
 
@@ -71,7 +72,7 @@ Keys starting with `_` are read by srtbox and never passed to srt:
 |---|---|
 | `_root` | The project tree. `run` picks the project from it when `-p` is omitted, nested repos are found under it, and srtbox warns when launched outside it. |
 | `_forward` | Host loopback ports to relay in: `"3000"`, or `"@path"` for a file holding a port number, relative to `_root`, such as `.nrepl-port`. |
-| `_broker` | A command, string or array, run before launch to make sure a host-side broker is up. It owns its socket and lifetime, and returns once the broker is ready. |
+| `_broker` | Programs whose matching commands run on the host instead of in the sandbox. See [Broker](#broker). |
 | `_mkdir` | Directories to create before launch. srt can only grant write access to a path that exists. |
 | `_denyEnv` | Variable-name patterns (`*TOKEN*`), matched case-insensitively against the launch environment, to withhold from the sandbox. |
 | `_allowEnv` | Exact variable names to pass through even when a `_denyEnv` pattern matches. Not patterns, and case-sensitive. |
@@ -130,6 +131,50 @@ the host's loopback, so leave bare `127.0.0.1` and `localhost` out of
 `allowedDomains`: either would open every host port, databases and daemons
 included. When an `@file` port changes, srtbox sends srt the new allowlist over
 its control channel (`--control-fd`) and drops the old port.
+
+## Broker
+
+Some commands cannot work inside: a static binary with no route through the
+proxy, or a command that has to change something the sandbox protects. `_broker`
+names programs whose matching commands run on the host instead:
+
+```json
+"_broker": {
+  "bz": {
+    "path": "~/src/myproject/bin/bz",
+    "check": "~/.config/srtbox/brokers/bz-check",
+    "host": [["aws", "logs"], ["db", "connect"]],
+    "approve": [["wt", "remove"]],
+    "stdin": [["db", "connect"]]
+  }
+}
+```
+
+A rule is a list of leading command words; flags are skipped, and `--` ends the
+words. `host` rules run straight away. `approve` rules ask first. Anything else
+runs the real program inside the sandbox as usual. When rules overlap the
+longest wins, and an `approve` rule wins a tie.
+
+- `path` is the real program, found on `PATH` when omitted.
+- `check`, if set, runs on the host with the command's arguments before
+  anything else. A non-zero exit refuses the command, and the check's output
+  says why. Use it for limits the command words cannot express.
+- `stdin` rules get the caller's input. Every other command reads `/dev/null`,
+  so a brokered command never consumes input meant for something else.
+
+Inside, a directory first on `PATH` holds a link named after each program, so
+`bz …` reaches the broker while `./bin/bz …` runs the real program directly.
+Brokered commands run with the host environment, in the caller's directory
+(kept within `_root`), on a pseudo-terminal when the caller has one. The
+broker is part of the `srtbox` process that launched the session, so it lives
+exactly as long as the session.
+
+**Approvals.** An `approve` command waits for your answer, given through a
+desktop notification (`notify-send` on Linux, a dialog on macOS) or by running
+`srtbox approve` in a terminal outside the sandbox. "Allow for session" covers
+later commands matching the same rule. With no answer within two minutes the
+command is refused. The directory holding pending requests is denied to the
+sandbox, which could otherwise answer its own.
 
 ## SSH
 

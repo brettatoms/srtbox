@@ -3,7 +3,6 @@
 package launch
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,9 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
-	"time"
 
 	"github.com/brettatoms/srtbox/internal/config"
 	"github.com/brettatoms/srtbox/internal/sandbox"
@@ -117,7 +114,13 @@ func Main(args []string) int {
 	lb := scopeLoopback(meta.Forward, meta.Root, settings)
 
 	if len(meta.Broker) > 0 {
-		runBroker(meta.Broker)
+		benv, stop, err := startBroker(project, meta, settings)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "srtbox:", err)
+			return 1
+		}
+		cleanup = append(cleanup, stop)
+		env = append(env, benv...)
 	}
 
 	f, err := os.CreateTemp("", "srtbox-"+project+"-*.json")
@@ -261,20 +264,6 @@ func resolveProject(project string) (string, error) {
 		return "", err
 	}
 	return config.ProjectFor(cwd)
-}
-
-// runBroker runs the project's broker command and waits for it. The command
-// owns everything about its broker — whether one is already running, its
-// socket, its idle timeout — and returns once the broker is ready.
-func runBroker(argv []string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	argv[0] = config.Home(argv[0])
-	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	c.Stdout, c.Stderr = os.Stderr, os.Stderr
-	if err := c.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "srtbox: warning: broker %q: %v\n", strings.Join(argv, " "), err)
-	}
 }
 
 func self() (string, error) {

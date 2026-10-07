@@ -4,7 +4,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/brettatoms/srtbox/internal/broker"
 	"github.com/brettatoms/srtbox/internal/launch"
 	"github.com/brettatoms/srtbox/internal/netproxy"
 	"github.com/brettatoms/srtbox/internal/sandbox"
@@ -19,6 +21,7 @@ Usage:
   srtbox run [-p <project>] [--ssh <host>] [--key <path>] [--] <command> [args...]
   srtbox list                       list configured projects
   srtbox show [<project>]           print the settings srt would receive
+  srtbox approve                    answer commands waiting for approval
   srtbox version
 
 Policy lives in $XDG_CONFIG_HOME/srtbox, by default ~/.config/srtbox:
@@ -36,6 +39,10 @@ func main() {
 }
 
 func run(args []string) int {
+	// Inside a session, srtbox is linked under each brokered program's name.
+	if name := filepath.Base(os.Args[0]); os.Getenv(broker.EnvSocket) != "" && name != selfName() {
+		return broker.ClientMain(name, args)
+	}
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, usage)
 		return 2
@@ -61,6 +68,8 @@ func run(args []string) int {
 			project = args[1]
 		}
 		return launch.Show(project)
+	case "approve":
+		return broker.ApproveMain(args[1:])
 	case "init":
 		return sandbox.Init(args[1:])
 	case "ssh-proxy":
@@ -68,4 +77,16 @@ func run(args []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "srtbox: unknown command %q\n\n%s", args[0], usage)
 	return 2
+}
+
+// selfName is the file name of the running binary, whatever it was invoked as.
+func selfName() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "srtbox"
+	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real
+	}
+	return filepath.Base(exe)
 }
