@@ -41,7 +41,7 @@ func Build(project string) (config.Meta, map[string]any, error) {
 
 	// The login ssh-agent is never reachable: its variable is withheld, and
 	// its socket is masked, since the path alone is enough to use it.
-	deny := config.DenyEnv(meta.DenyEnv, os.Environ())
+	deny := config.DenyEnv(meta.DenyEnv, meta.AllowEnv, os.Environ())
 	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
 		deny = append(deny, "SSH_AUTH_SOCK")
 		if _, err := os.Stat(sock); err == nil {

@@ -75,9 +75,10 @@ Keys starting with `_` are read by srtbox and never passed to srt:
 | `_broker` | A command, string or array, run before launch to make sure a host-side broker is up. It owns its socket and lifetime, and returns once the broker is ready. |
 | `_mkdir` | Directories to create before launch. srt can only grant write access to a path that exists. |
 | `_denyEnv` | Variable-name patterns (`*TOKEN*`), matched case-insensitively against the launch environment, to withhold from the sandbox. |
+| `_allowEnv` | Exact variable names to pass through even when a `_denyEnv` pattern matches. Not patterns, and case-sensitive. |
 
 [examples/](examples) has a starting `base.json` and project file. `srtbox
---show <project>` prints exactly what srt will receive, including what srtbox
+show <project>` prints exactly what srt will receive, including what srtbox
 adds at launch.
 
 ## What srtbox adds at launch
@@ -97,7 +98,7 @@ repo, without anyone choosing to run it.
 masked, since the path alone is enough to use it. `--ssh` opens a single host
 instead (below).
 
-**Matching variables are withheld,** per `_denyEnv`.
+**Matching variables are withheld,** per `_denyEnv` less `_allowEnv`.
 
 **srtbox's own binary is made readable,** because it runs again inside as the
 sandbox's first process.

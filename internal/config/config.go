@@ -79,11 +79,12 @@ func Within(path, root string) bool {
 
 // Meta holds the "_" keys: settings srtbox acts on, never passed to srt.
 type Meta struct {
-	Root    string   // the project tree; protected repos are found under it
-	Forward []string // host loopback ports to relay in: "3020", or "@path/to/portfile"
-	Broker  []string // command that ensures the project's host-side broker is running
-	Mkdir   []string // directories to create before launch, so srt can bind them
-	DenyEnv []string // variable-name patterns to withhold from the sandbox
+	Root     string   // the project tree; protected repos are found under it
+	Forward  []string // host loopback ports to relay in: "3020", or "@path/to/portfile"
+	Broker   []string // command that ensures the project's host-side broker is running
+	Mkdir    []string // directories to create before launch, so srt can bind them
+	DenyEnv  []string // variable-name patterns to withhold from the sandbox
+	AllowEnv []string // exact variable names exempt from DenyEnv
 }
 
 // Load merges base.json (optional) with <project>.json.
@@ -208,10 +209,11 @@ func expandString(s string, lookup func(string) (string, bool)) (string, bool) {
 // "_"-prefixed key at any depth.
 func Split(doc map[string]any) (Meta, map[string]any) {
 	m := Meta{
-		Root:    Home(str(doc["_root"])),
-		Forward: strs(doc["_forward"]),
-		Broker:  cmd(doc["_broker"]),
-		DenyEnv: strs(doc["_denyEnv"]),
+		Root:     Home(str(doc["_root"])),
+		Forward:  strs(doc["_forward"]),
+		Broker:   cmd(doc["_broker"]),
+		DenyEnv:  strs(doc["_denyEnv"]),
+		AllowEnv: strs(doc["_allowEnv"]),
 	}
 	for _, d := range strs(doc["_mkdir"]) {
 		m.Mkdir = append(m.Mkdir, Home(d))

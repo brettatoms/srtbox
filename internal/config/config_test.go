@@ -54,8 +54,16 @@ func TestSplitStripsMetaAtEveryDepth(t *testing.T) {
 
 func TestDenyEnvMatchesCaseInsensitively(t *testing.T) {
 	env := []string{"MAGIT_FORGE_GITHUB_TOKEN=x", "brave_api_key=y", "PATH=/bin", "HOME=/h"}
-	got := DenyEnv([]string{"*TOKEN*", "*KEY*"}, env)
+	got := DenyEnv([]string{"*TOKEN*", "*KEY*"}, nil, env)
 	if !reflect.DeepEqual(got, []string{"MAGIT_FORGE_GITHUB_TOKEN", "brave_api_key"}) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestDenyEnvSparesExactAllowedNames(t *testing.T) {
+	env := []string{"FIGMA_TOKEN=x", "FIGMA_TOKEN_2=y", "figma_token=z"}
+	got := DenyEnv([]string{"*TOKEN*"}, []string{"FIGMA_TOKEN", "FIGMA*"}, env)
+	if !reflect.DeepEqual(got, []string{"FIGMA_TOKEN_2", "figma_token"}) {
 		t.Fatalf("got %v", got)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -133,12 +134,16 @@ func GitHooksPath(repo string) string {
 }
 
 // DenyEnv returns the names in env (KEY=value pairs) matching any pattern,
-// compared case-insensitively. srt accepts exact names only, so the matching
-// happens here, against the environment the sandbox is about to inherit.
-func DenyEnv(patterns, env []string) []string {
+// compared case-insensitively, except those listed exactly in allow. srt
+// accepts exact names only, so the matching happens here, against the
+// environment the sandbox is about to inherit.
+func DenyEnv(patterns, allow, env []string) []string {
 	var names []string
 	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(allow, name) {
+			continue
+		}
 		for _, p := range patterns {
 			if ok, _ := path.Match(strings.ToUpper(p), strings.ToUpper(name)); ok {
 				names = append(names, name)
