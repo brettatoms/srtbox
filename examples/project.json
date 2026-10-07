@@ -1,0 +1,13 @@
+{
+  "_root": "~/src/myproject",
+  "_forward": ["3000", "@.nrepl-port"],
+
+  "network": {
+    "allowedDomains": ["api.stripe.com", "127.0.0.1", "[::1]"]
+  },
+
+  "filesystem": {
+    "allowRead": ["~/src/myproject"],
+    "allowWrite": ["~/src/myproject"]
+  }
+}

@@ -1,0 +1,171 @@
+# srtbox
+
+srtbox runs a command in an [srt](https://github.com/anthropics/sandbox-runtime)
+sandbox under a per-project policy. srt enforces filesystem and network limits
+on one process tree. srtbox adds what running a coding agent in it day to day
+needs around that: layered config, protection for nested git repos, withheld
+credentials, access to host dev servers, terminal resizing, and scoped SSH.
+
+```
+srtbox myproject claude
+```
+
+## Install
+
+srtbox needs srt on `PATH`. On Linux, srt also needs bubblewrap and socat; the
+nixpkgs `sandbox-runtime` package includes both.
+
+```
+npm install -g @anthropic-ai/sandbox-runtime    # or nixpkgs#sandbox-runtime
+```
+
+Then install srtbox, either a release binary or from source.
+
+**Release binary.** Each release has a static binary per platform, `SHA256SUMS`,
+and a signed build-provenance attestation:
+
+```
+curl -fLO https://github.com/brettatoms/srtbox/releases/download/v0.1.0/srtbox-linux-amd64
+gh attestation verify srtbox-linux-amd64 --repo brettatoms/srtbox
+install -m 755 srtbox-linux-amd64 ~/.local/bin/srtbox
+```
+
+Builds are reproducible: with the Go version on the `toolchain` line of
+`go.mod`, `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X
+main.version=<tag>"` at the tag gives a byte-identical binary.
+
+**From source:** `go install github.com/brettatoms/srtbox@latest`.
+
+## Usage
+
+```
+srtbox <project> [--ssh <host>] [--key <path>] [--] <command> [args...]
+srtbox --list                     list configured projects
+srtbox --show <project>           print the settings srt would receive
+srtbox hostport <port|@file>...   relay host loopback ports, from inside
+srtbox version
+```
+
+## Configuration
+
+Policy lives in `$XDG_CONFIG_HOME/srtbox`, by default `~/.config/srtbox`
+(`SRTBOX_CONFIG_DIR` overrides it). `base.json` applies to every project and
+`<project>.json` overlays it: objects merge key by key, arrays are combined, and
+other values from the project win. The result is srt's own
+[settings format](https://github.com/anthropics/sandbox-runtime#configuration),
+so everything srt supports can be set here.
+
+Keep this directory outside every project you sandbox. A policy file inside a
+project tree is writable from inside the sandbox, and the next launch would
+honour whatever the sandboxed process wrote.
+
+`${VAR}` in any string is replaced from the environment. An array entry naming
+an unset variable is dropped, so `${XDG_RUNTIME_DIR}` entries disappear on macOS
+rather than becoming broken paths.
+
+Keys starting with `_` are read by srtbox and never passed to srt:
+
+| Key | Meaning |
+|---|---|
+| `_root` | The project tree. Nested repos are found under it, and srtbox warns when launched outside it. |
+| `_forward` | Host loopback ports to relay in: `"3000"`, or `"@path"` for a file holding a port number, relative to `_root`, such as `.nrepl-port`. |
+| `_broker` | A command, string or array, run before launch to make sure a host-side broker is up. It owns its socket and lifetime, and returns once the broker is ready. |
+| `_mkdir` | Directories to create before launch. srt can only grant write access to a path that exists. |
+| `_denyEnv` | Variable-name patterns (`*TOKEN*`), matched case-insensitively against the launch environment, to withhold from the sandbox. |
+
+[examples/](examples) has a starting `base.json` and project file. `srtbox
+--show <project>` prints exactly what srt will receive, including what srtbox
+adds at launch.
+
+## What srtbox adds at launch
+
+**Nested repos are protected.** srt write-protects git hooks, git config and
+editor config, but only where its own scan finds them, and the scan skips
+anything the enclosing repo ignores. In a workspace of checked-out repos, that
+is every repo but the outer one. srtbox finds each repo and worktree under
+`_root` and protects its `.git/hooks`, `.git/config`, `config.worktree`, a
+worktree's `.git` pointer, the directory `core.hooksPath` names (husky's
+`.husky/_` protects all of `.husky`), hook-manager config such as
+`lefthook.yml`, and `.mcp.json`, `.vscode`, `.idea` and `.gitmodules`. Each of
+these runs code on the host the next time git, an editor or an agent opens the
+repo, without anyone choosing to run it.
+
+**The login ssh-agent is withheld.** `SSH_AUTH_SOCK` is unset and its socket
+masked, since the path alone is enough to use it. `--ssh` opens a single host
+instead (below).
+
+**Matching variables are withheld,** per `_denyEnv`.
+
+**srtbox's own binary is made readable,** because it runs again inside as the
+sandbox's first process.
+
+## Inside the sandbox
+
+The command runs under `srtbox init`, which:
+
+- relays the `_forward` ports from the host's loopback. On Linux the sandbox has
+  its own network namespace, so the host's dev servers and REPLs are otherwise
+  invisible. A port is relayed only if the host is serving it at launch, so
+  "connection refused" inside still means nothing is running; for a server
+  started later, run `srtbox hostport <port>` inside.
+- relays terminal resizes. srt starts the sandbox in a new session on Linux, so
+  the kernel never delivers `SIGWINCH` inside and full-screen programs keep
+  drawing at their starting size.
+- passes termination signals on and reports a signal death as `128+N`.
+
+Relays go through srt's own proxy using HTTP CONNECT, which carries any TCP. The
+target still has to be allowed: the example project allows `127.0.0.1`.
+
+## SSH
+
+There is no SSH inside by default. `--ssh <host>` opens one host for the session:
+
+```
+srtbox myproject --ssh build-box claude
+ssh -F "$SRTBOX_SSH_CONFIG" build-box       # inside
+```
+
+srtbox resolves the host through `~/.ssh/config`, starts a throwaway ssh-agent
+holding only that host's key, adds `host:port` to the allowed domains, and
+writes an ssh config that reaches it through srt's proxy. The key never enters
+the sandbox, only a signing channel to the agent, and host-key checking stays
+strict: the host has to be in `~/.ssh/known_hosts` already. git uses this config
+automatically. `--key` picks the identity when a host has several.
+
+On Linux the sandbox reaches the agent over a Unix socket, which needs
+`"allowAllUnixSockets": true` in `network`.
+
+## Platforms
+
+Linux and macOS. srt uses bubblewrap on Linux and Seatbelt on macOS, and the
+two differ in ways srtbox accounts for: on macOS the sandbox shares the host's
+loopback and stays attached to the terminal, so `init` does not relay ports or
+resizes there.
+
+## Limits
+
+- srt's proxy is the only way out, and only programs that honour `HTTP_PROXY`
+  use it. Static binaries that resolve names and connect on their own have no
+  network inside — babashka, for one. A `_broker` can run such commands on the
+  host instead.
+- A sandbox protects the session. It does not protect you from code the session
+  wrote that you later run yourself: a test, a build script, a package
+  manifest. srtbox covers what runs without anyone choosing to run it.
+- With `allowAllUnixSockets`, the D-Bus session bus is reachable on Linux, and
+  with it any secret stored in the desktop keyring.
+- srt masks a denied home directory with a writable tmpfs, so a write there
+  appears to succeed and is discarded when the command exits.
+
+## Development
+
+```
+devenv shell        # Go and srt
+go test ./...
+```
+
+To release, push a `vX.Y.Z` tag. The release workflow builds each platform,
+writes `SHA256SUMS`, attests provenance and publishes the GitHub release.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

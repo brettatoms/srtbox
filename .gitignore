@@ -1,0 +1,6 @@
+.devenv/
+.direnv/
+.envrc
+devenv.local.nix
+/srtbox
+/dist/

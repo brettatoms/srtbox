@@ -1,0 +1,22 @@
+{
+  "_denyEnv": ["*TOKEN*", "*_KEY", "*_SECRET", "*PASSWORD*"],
+  "_mkdir": ["${XDG_RUNTIME_DIR}/clojure-mcp-light"],
+
+  "network": {
+    "allowedDomains": [
+      "api.anthropic.com",
+      "claude.ai",
+      "github.com",
+      "*.github.com",
+      "*.actions.githubusercontent.com",
+      "registry.npmjs.org"
+    ],
+    "allowAllUnixSockets": true
+  },
+
+  "filesystem": {
+    "denyRead": ["~"],
+    "allowRead": ["~/.claude", "~/.claude.json", "~/.gitconfig", "~/.config/git", "~/.local/bin"],
+    "allowWrite": ["/tmp", "~/.claude", "~/.claude.json", "${XDG_RUNTIME_DIR}/clojure-mcp-light"]
+  }
+}

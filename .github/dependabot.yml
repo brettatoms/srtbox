@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs; this keeps the pins current. The
+  # cooldown holds off on a release until it has been public for a week.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
