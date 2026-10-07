@@ -12,17 +12,20 @@ func TestParseArgs(t *testing.T) {
 	cases := []struct {
 		args    []string
 		project string
-		host    string
+		ssh     []sshTarget
 		cmd     []string
 		wantErr bool
 	}{
-		{[]string{"claude"}, "", "", []string{"claude"}, false},
-		{[]string{"-p", "p", "claude"}, "p", "", []string{"claude"}, false},
-		{[]string{"--project", "p", "--", "claude", "-x"}, "p", "", []string{"claude", "-x"}, false},
-		{[]string{"--ssh", "h", "-p", "p", "--", "claude"}, "p", "h", []string{"claude"}, false},
-		{[]string{"--", "-p", "p"}, "", "", []string{"-p", "p"}, false},
-		{[]string{"-p"}, "", "", nil, true},
-		{[]string{"-p", "p"}, "", "", nil, true},
+		{[]string{"claude"}, "", nil, []string{"claude"}, false},
+		{[]string{"-p", "p", "claude"}, "p", nil, []string{"claude"}, false},
+		{[]string{"--project", "p", "--", "claude", "-x"}, "p", nil, []string{"claude", "-x"}, false},
+		{[]string{"--ssh", "h", "-p", "p", "--", "claude"}, "p", []sshTarget{{host: "h"}}, []string{"claude"}, false},
+		{[]string{"--ssh", "a", "--key", "/k", "--ssh", "b", "x"}, "", []sshTarget{{"a", "/k"}, {"b", ""}}, []string{"x"}, false},
+		{[]string{"--", "-p", "p"}, "", nil, []string{"-p", "p"}, false},
+		{[]string{"--key", "/k", "--ssh", "a", "x"}, "", nil, nil, true}, // --key before any --ssh
+		{[]string{"--ssh", "a", "--ssh", "a", "x"}, "", nil, nil, true},  // same host twice
+		{[]string{"-p"}, "", nil, nil, true},
+		{[]string{"-p", "p"}, "", nil, nil, true},
 	}
 	for _, c := range cases {
 		o, cmd, err := parseArgs(c.args)
@@ -30,8 +33,8 @@ func TestParseArgs(t *testing.T) {
 			t.Errorf("%v: err %v", c.args, err)
 			continue
 		}
-		if !c.wantErr && (o.project != c.project || o.sshHost != c.host || !reflect.DeepEqual(cmd, c.cmd)) {
-			t.Errorf("%v: got %q %q %q", c.args, o.project, o.sshHost, cmd)
+		if !c.wantErr && (o.project != c.project || !reflect.DeepEqual(o.ssh, c.ssh) || !reflect.DeepEqual(cmd, c.cmd)) {
+			t.Errorf("%v: got %q %v %q", c.args, o.project, o.ssh, cmd)
 		}
 	}
 }

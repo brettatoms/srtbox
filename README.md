@@ -104,7 +104,7 @@ leaves an empty placeholder in the working tree for the whole session: it shows
 up in `git status` and stops the directory being removed.
 
 **The login ssh-agent is withheld.** `SSH_AUTH_SOCK` is unset and its socket
-masked, since the path alone is enough to use it. `--ssh` opens a single host
+masked, since the path alone is enough to use it. `--ssh` opens chosen hosts
 instead (below).
 
 **Matching variables are withheld,** per `_denyEnv` less `_allowEnv`.
@@ -251,19 +251,22 @@ sandbox, which could otherwise answer its own.
 
 ## SSH
 
-There is no SSH inside by default. `--ssh <host>` opens one host for the session:
+There is no SSH inside by default. `--ssh <host>` opens a host for the
+session, and can be repeated:
 
 ```
-srtbox run --ssh build-box claude
+srtbox run --ssh github.com --ssh build-box --key ~/.ssh/build claude
 ssh -F "$SRTBOX_SSH_CONFIG" build-box       # inside
 ```
 
-srtbox resolves the host through `~/.ssh/config`, starts a throwaway ssh-agent
-holding only that host's key, adds `host:port` to the allowed domains, and
-writes an ssh config that reaches it through srt's proxy. The key never enters
-the sandbox, only a signing channel to the agent, and host-key checking stays
-strict: the host has to be in `~/.ssh/known_hosts` already. git uses this config
-automatically. `--key` picks the identity when a host has several.
+srtbox resolves each host through `~/.ssh/config`, starts one throwaway
+ssh-agent holding only those hosts' keys, adds each `host:port` to the allowed
+domains, and writes an ssh config that reaches them through srt's proxy, each
+host offered only its own key. The keys never enter the sandbox, only a
+signing channel to the agent, and host-key checking stays strict: each host has
+to be in `~/.ssh/known_hosts` already. git uses this config automatically.
+`--key` picks the identity for the `--ssh` before it, when that host has
+several.
 
 On Linux the sandbox reaches the agent over a Unix socket, which needs
 `"allowAllUnixSockets": true` in `network`.

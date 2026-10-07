@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"syscall"
 
 	"github.com/brettatoms/srtbox/internal/config"
@@ -99,8 +100,8 @@ func Main(args []string) int {
 		}
 	}()
 
-	if opts.sshHost != "" {
-		s, err := setupSSH(opts.sshHost, opts.sshKey)
+	if len(opts.ssh) > 0 {
+		s, err := setupSSH(opts.ssh)
 		if s != nil {
 			cleanup = append(cleanup, s.cleanup)
 		}
@@ -255,7 +256,10 @@ func List() int {
 	return 0
 }
 
-type options struct{ project, sshHost, sshKey string }
+type options struct {
+	project string
+	ssh     []sshTarget
+}
 
 func parseArgs(args []string) (options, []string, error) {
 	var o options
@@ -270,9 +274,16 @@ func parseArgs(args []string) (options, []string, error) {
 			case "-p", "--project":
 				o.project = rest[1]
 			case "--ssh":
-				o.sshHost = rest[1]
+				if slices.ContainsFunc(o.ssh, func(t sshTarget) bool { return t.host == rest[1] }) {
+					return o, nil, fmt.Errorf("--ssh %s given twice", rest[1])
+				}
+				o.ssh = append(o.ssh, sshTarget{host: rest[1]})
 			default:
-				o.sshKey = config.Home(rest[1])
+				// --key names the key for the --ssh before it.
+				if len(o.ssh) == 0 {
+					return o, nil, errors.New("--key must follow the --ssh it is for")
+				}
+				o.ssh[len(o.ssh)-1].key = config.Home(rest[1])
 			}
 			rest = rest[2:]
 			continue
