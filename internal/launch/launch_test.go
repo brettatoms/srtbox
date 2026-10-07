@@ -1,10 +1,12 @@
 package launch
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -97,4 +99,21 @@ func strs(v any) []string {
 		out = append(out, x.(string))
 	}
 	return out
+}
+
+func TestBuildFillsTheListsSrtRequires(t *testing.T) {
+	conf := t.TempDir()
+	t.Setenv("SRTBOX_CONFIG_DIR", conf)
+	t.Setenv("SSH_AUTH_SOCK", "")
+	os.WriteFile(filepath.Join(conf, "p.json"), []byte(`{}`), 0o600)
+	_, s, err := Build("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(s)
+	for _, want := range []string{`"allowedDomains":[]`, `"deniedDomains":[]`, `"denyWrite":[]`, `"allowWrite":[]`, `"denyRead":[]`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("missing %s in %s", want, b)
+		}
+	}
 }

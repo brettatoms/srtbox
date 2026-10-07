@@ -334,6 +334,9 @@ func Append(doc map[string]any, path []string, values ...string) {
 	}
 	last := path[len(path)-1]
 	cur, _ := node[last].([]any)
+	if cur == nil {
+		cur = []any{}
+	}
 	have := map[string]bool{}
 	for _, x := range cur {
 		if s, ok := x.(string); ok {

@@ -51,6 +51,15 @@ func Build(project string) (config.Meta, map[string]any, error) {
 		config.AddEnvDeny(settings, deny...)
 	}
 
+	// srt refuses settings that lack any of these lists, so a config can leave
+	// out the ones it has nothing to put in.
+	for _, k := range [][2]string{
+		{"network", "allowedDomains"}, {"network", "deniedDomains"},
+		{"filesystem", "denyRead"}, {"filesystem", "allowWrite"}, {"filesystem", "denyWrite"},
+	} {
+		config.Append(settings, k[:])
+	}
+
 	// srtbox runs again inside the sandbox as `srtbox init`, so its own binary
 	// has to be readable there.
 	if exe, err := self(); err == nil {
