@@ -135,6 +135,26 @@ func TestScopeUnixSocketsOnMacOSOnly(t *testing.T) {
 	}
 }
 
+func TestTempDirIsPrivateAndWritableInside(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	s := map[string]any{}
+	dir, err := tempDir(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	fi, err := os.Stat(dir)
+	if err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
+		t.Fatalf("stat %s: %v, %v", dir, fi, err)
+	}
+	if real, _ := filepath.EvalSymlinks(dir); real != dir {
+		t.Errorf("%s resolves to %s", dir, real)
+	}
+	if aw := s["filesystem"].(map[string]any)["allowWrite"]; !reflect.DeepEqual(aw, []any{dir}) {
+		t.Errorf("allowWrite %v", aw)
+	}
+}
+
 func TestAllowTerminalOnMacOSUnlessSet(t *testing.T) {
 	s := map[string]any{}
 	allowTerminal(s, "darwin")

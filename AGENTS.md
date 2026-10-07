@@ -38,6 +38,9 @@ input to code running unsandboxed on the host.
 - srt sets its own `GIT_SSH_COMMAND` inside the sandbox, overwriting the
   caller's. `--ssh` passes ours as `SRTBOX_GIT_SSH_COMMAND`, and `srtbox init`
   restores it.
+- srt sets the sandbox's `TMPDIR` to `$CLAUDE_CODE_TMPDIR`, or else to
+  `/tmp/claude`, which it never creates. srtbox passes a per-session directory
+  as `CLAUDE_CODE_TMPDIR`.
 - bwrap fails the whole launch if a `denyWrite` path sits under another
   `denyWrite` path that does not exist yet. `ProtectRepos` drops paths that a
   protected ancestor already covers.

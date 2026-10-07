@@ -150,6 +150,14 @@ func Main(args []string) int {
 	cleanup = append(cleanup, func() { os.RemoveAll(sess) })
 	config.Append(settings, []string{"filesystem", "allowRead"}, sess)
 
+	tmp, err := tempDir(settings)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "srtbox:", err)
+		return 1
+	}
+	cleanup = append(cleanup, func() { os.RemoveAll(tmp) })
+	env = append(env, "CLAUDE_CODE_TMPDIR="+tmp)
+
 	if len(meta.Broker) > 0 {
 		benv, stop, err := startBroker(project, meta, settings, sess)
 		if err != nil {
@@ -349,6 +357,23 @@ func resolveProject(project string) (string, error) {
 		return "", err
 	}
 	return config.ProjectFor(cwd)
+}
+
+// tempDir creates the session's own TMPDIR and makes it writable inside. srt
+// sets the sandbox's TMPDIR to $CLAUDE_CODE_TMPDIR, or else to /tmp/claude,
+// which it never creates and every session would share.
+func tempDir(settings map[string]any) (string, error) {
+	dir, err := os.MkdirTemp("", "srtbox-tmp-*")
+	if err != nil {
+		return "", err
+	}
+	// On macOS the temporary directory sits under /var, a link to
+	// /private/var; grant the resolved path.
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	config.Append(settings, []string{"filesystem", "allowWrite"}, dir)
+	return dir, nil
 }
 
 func self() (string, error) {

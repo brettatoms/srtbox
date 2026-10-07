@@ -117,6 +117,9 @@ instead (below).
 **srtbox's own binary is made readable,** because it runs again inside as the
 sandbox's first process.
 
+**Each session gets its own `TMPDIR`,** a new directory that is writable inside
+and removed when the session ends.
+
 ## Inside the sandbox
 
 The command runs under `srtbox init`, which:
