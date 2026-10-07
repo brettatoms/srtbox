@@ -332,7 +332,8 @@ screen fills with the terminal's replies. Keystroke injection into your
 terminal (`TIOCSTI`) is refused either way.
 
 On macOS srtbox also turns `allowAllUnixSockets` off and allows only its own
-sockets (the broker's and the `--ssh` agents') plus `allowUnixSockets`.
+sockets (the broker's and the `--ssh` agents'), sockets in the session's
+`TMPDIR`, and `allowUnixSockets`.
 Seatbelt lets a sandbox connect to a socket whose path it cannot read, so with
 every socket allowed the login ssh-agent would stay usable. List any other
 socket a project needs, such as Docker's, in `allowUnixSockets`.

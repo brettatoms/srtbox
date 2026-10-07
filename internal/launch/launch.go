@@ -113,7 +113,8 @@ func Main(args []string) int {
 		}
 	}()
 
-	// sockets are the directories holding srtbox's own Unix sockets.
+	// sockets are the directories that may hold Unix sockets on macOS:
+	// srtbox's own, and the session's TMPDIR, where programs make theirs.
 	var sockets []string
 	if len(opts.ssh) > 0 {
 		s, err := setupSSH(opts.ssh)
@@ -167,7 +168,7 @@ func Main(args []string) int {
 		cleanup = append(cleanup, stop)
 		env = append(env, benv...)
 	}
-	scopeUnixSockets(settings, runtime.GOOS, append(sockets, sess)...)
+	scopeUnixSockets(settings, runtime.GOOS, append(sockets, sess, tmp)...)
 
 	pol, err := policy.New(project, meta, settings)
 	if err != nil {
@@ -260,11 +261,11 @@ func allowTerminal(settings map[string]any, goos string) {
 }
 
 // scopeUnixSockets limits Unix sockets on macOS to an allowlist: srtbox's own
-// directories plus the config's allowUnixSockets. Seatbelt lets a sandbox
-// connect to a socket whose path it cannot read, so with every socket allowed
-// the login ssh-agent stays usable however its path is hidden. Linux needs no
-// list: a socket the sandbox cannot see cannot be reached, and srt cannot
-// filter sockets by path there.
+// directories, the session's TMPDIR, and the config's allowUnixSockets.
+// Seatbelt lets a sandbox connect to a socket whose path it cannot read, so
+// with every socket allowed the login ssh-agent stays usable however its path
+// is hidden. Linux needs no list: a socket the sandbox cannot see cannot be
+// reached, and srt cannot filter sockets by path there.
 func scopeUnixSockets(settings map[string]any, goos string, dirs ...string) {
 	if goos != "darwin" {
 		return
