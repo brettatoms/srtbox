@@ -2,8 +2,10 @@
   "_denyEnv": ["*TOKEN*", "*_KEY", "*_SECRET", "*PASSWORD*"],
   "_mkdir": ["${XDG_RUNTIME_DIR}/clojure-mcp-light"],
   "_inject": {
-    "GH_TOKEN": {"from": "gh auth token", "hosts": ["api.github.com", "github.com", "uploads.github.com"]}
+    "GH_TOKEN": {"from": "gh auth token", "hosts": ["api.github.com", "github.com", "uploads.github.com"]},
+    "CLAUDE_CODE_OAUTH_TOKEN": {"from": "secret-tool lookup service srtbox-claude-token", "hosts": ["api.anthropic.com"]}
   },
+  "credentials": {"files": [{"path": "~/.claude/.credentials.json", "mode": "deny"}]},
 
   "network": {
     "allowedDomains": [

@@ -84,9 +84,11 @@ Keys starting with `_` are read by srtbox and never passed to srt:
 | `_allowEnv` | Exact variable names to pass through even when a `_denyEnv` pattern matches. Not patterns, and case-sensitive. |
 | `_inject` | Variables fetched on the host and given to the sandbox as placeholders. See [Credentials](#credentials). |
 
-[examples/](examples) has a starting `base.json` and project file. `srtbox
-show <project>` prints exactly what srt will receive, including what srtbox
-adds at launch.
+[examples/](examples) has a starting `base.json` and project file. The
+`base.json` follows the recipe in [Claude Code's own login](#credentials), so
+create and store the token it injects before you use it. `srtbox show
+<project>` prints exactly what srt will receive, including what srtbox adds at
+launch.
 
 ## What srtbox adds at launch
 
