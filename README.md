@@ -1,9 +1,9 @@
 # srtbox
 
-srtbox runs a command in an [srt](https://github.com/anthropics/sandbox-runtime)
-sandbox under a per-project policy. srt enforces filesystem and network limits
-on one process tree. srtbox adds what running a coding agent in it day to day
-needs around that: layered config, protection for nested git repos, withheld
+srtbox runs a command, such as a coding agent, in an
+[srt](https://github.com/anthropics/sandbox-runtime) sandbox under a
+per-project policy. srt limits the filesystem and network access of one process
+tree. srtbox adds layered config, protection for nested git repos, withheld
 credentials, access to host dev servers, terminal resizing, and scoped SSH.
 
 ```
@@ -36,13 +36,44 @@ main.version=<tag>"` at the tag gives a byte-identical binary.
 
 **From source:** `go install github.com/brettatoms/srtbox@latest`.
 
+## Getting started
+
+1. Create the config directory, and copy the examples into it. The project
+   file's name is the project's name:
+
+   ```
+   mkdir -p ~/.config/srtbox && cd ~/.config/srtbox
+   curl -fLo base.json https://raw.githubusercontent.com/brettatoms/srtbox/main/examples/base.json
+   curl -fLo myproject.json https://raw.githubusercontent.com/brettatoms/srtbox/main/examples/project.json
+   ```
+
+2. In `myproject.json`, set `_root` to your project's directory, and use the
+   same path in `allowRead` and `allowWrite`.
+3. Check that srtbox finds the project, and review the settings that srt
+   receives:
+
+   ```
+   srtbox list
+   srtbox show myproject
+   ```
+
+4. From inside the project, run a command in the sandbox:
+
+   ```
+   cd ~/src/myproject && srtbox run -- ls
+   ```
+
+5. When the sandbox blocks a path, host, or environment variable that the
+   command needs, run `srtbox why` on it to find the responsible rule. See
+   [Why is it blocked?](#why-is-it-blocked).
+
 ## Usage
 
 ```
 srtbox run [-p <project>] [--ssh <host>] [--key <path>] [--] <command> [args...]
 srtbox list                       list configured projects
 srtbox show [<project>]           print the settings srt would receive
-srtbox why [-p <project>] <target>...   explain access to a path, host or variable
+srtbox why [-p <project>] <target>...   explain access to a path, host, or environment variable
 srtbox approve                    answer brokered commands waiting for approval
 srtbox version
 ```
@@ -68,9 +99,14 @@ Keep this directory outside every project you sandbox. A policy file inside a
 project tree is writable from inside the sandbox, and the next launch would
 honour whatever the sandboxed process wrote.
 
-`${VAR}` in any string is replaced from the environment. An array entry naming
-an unset variable is dropped, so `${XDG_RUNTIME_DIR}` entries disappear on macOS
-rather than becoming broken paths.
+`${VAR}` in any string is replaced with the value of the environment variable
+`VAR`. An array entry that names an unset environment variable is dropped, so
+`${XDG_RUNTIME_DIR}` entries disappear on macOS rather than becoming broken
+paths.
+
+The files are plain JSON, without comments. For a note, add a key that starts
+with `_`, such as `"_comment"`. srtbox ignores `_` keys that it doesn't know,
+and never passes them to srt.
 
 Keys starting with `_` are read by srtbox and never passed to srt:
 
@@ -80,15 +116,52 @@ Keys starting with `_` are read by srtbox and never passed to srt:
 | `_forward` | Host loopback ports to relay in: `"3000"`, or `"@path"` for a file holding a port number, relative to `_root`, such as `.nrepl-port`. |
 | `_broker` | Programs whose matching commands run on the host instead of in the sandbox. See [Broker](#broker). |
 | `_mkdir` | Directories to create before launch. srt can only grant write access to a path that exists. |
-| `_denyEnv` | Variable-name patterns (`*TOKEN*`), matched case-insensitively against the launch environment, to withhold from the sandbox. |
-| `_allowEnv` | Exact variable names to pass through even when a `_denyEnv` pattern matches. Not patterns, and case-sensitive. |
-| `_inject` | Variables fetched on the host and given to the sandbox as placeholders. See [Credentials](#credentials). |
+| `_denyEnv` | Patterns for environment variable names (`*TOKEN*`), matched case-insensitively against the launch environment, to withhold from the sandbox. |
+| `_allowEnv` | Exact environment variable names to pass through even when a `_denyEnv` pattern matches. Not patterns, and case-sensitive. |
+| `_inject` | Environment variables whose values srtbox fetches on the host and gives to the sandbox as placeholders. See [Credentials](#credentials). |
 
 [examples/](examples) has a starting `base.json` and project file. The
 `base.json` follows the recipe in [Claude Code's own login](#credentials), so
 create and store the token it injects before you use it. `srtbox show
-<project>` prints exactly what srt will receive, including what srtbox adds at
+<project>` prints the settings that srt receives, including what srtbox adds at
 launch.
+
+## Using srtbox with Claude Code
+
+Claude Code needs its own files and its API hosts. In `base.json`:
+
+```json
+"network": {"allowedDomains": ["api.anthropic.com", "claude.ai"]},
+"filesystem": {
+  "allowRead": ["~/.claude", "~/.claude.json"],
+  "allowWrite": ["~/.claude", "~/.claude.json"]
+}
+```
+
+Claude Code's login doesn't reach the sandbox on macOS, and on Linux the
+sandbox can read it. To give Claude a token that the sandbox never sees, follow
+[Claude Code's own login](#credentials). With that token, Claude Code can't
+start Remote Control sessions or use claude.ai connectors.
+
+Start Claude from inside the project's `_root`. Outside it, srtbox warns that
+the sandbox grants a different tree, and on macOS Claude exits with
+`error: An unknown error occurred (Unexpected)`.
+
+A launcher script saves retyping the flags. This one opens github.com for
+pushes, and starts Claude directly when it already runs inside a session:
+
+```sh
+#!/usr/bin/env bash
+set -e
+cd ~/src/myproject
+if [ -n "${SRTBOX_PROJECT:-}" ]; then
+  exec claude "$@"
+fi
+exec srtbox run --ssh github.com -- claude "$@"
+```
+
+Claude Code's hooks and MCP servers run inside the sandbox too, so the
+programs that they call must be readable there, for example in `~/.local/bin`.
 
 ## What srtbox adds at launch
 
@@ -111,10 +184,11 @@ leaves an empty placeholder in the working tree for the whole session: it shows
 up in `git status` and stops the directory being removed.
 
 **The login ssh-agent is withheld.** `SSH_AUTH_SOCK` is unset and its socket
-masked, since the path alone is enough to use it. `--ssh` opens chosen hosts
-instead (below).
+masked, because the path alone is enough to use it. `--ssh` opens chosen hosts
+instead. See [SSH](#ssh).
 
-**Matching variables are withheld,** per `_denyEnv` less `_allowEnv`.
+**Matching environment variables are withheld,** per `_denyEnv` less
+`_allowEnv`.
 
 **srtbox's own binary is made readable,** because it runs again inside as the
 sandbox's first process.
@@ -136,6 +210,15 @@ The command runs under `srtbox init`, which:
   the kernel never delivers `SIGWINCH` inside and full-screen programs keep
   drawing at their starting size.
 - passes termination signals on and reports a signal death as `128+N`.
+
+These environment variables are set inside a session, for scripts that need
+to know where they run:
+
+| Environment variable | Value |
+|---|---|
+| `SRTBOX_PROJECT` | The project's name. Set in every session, so a script can test it to tell whether it runs inside one. |
+| `SRTBOX_ROOT` | The project's `_root`. |
+| `SRTBOX_SSH_CONFIG` | The ssh config for the hosts that `--ssh` opened. Set only with `--ssh`. |
 
 Relays go through srt's own proxy using HTTP CONNECT, which carries any TCP.
 srtbox allows `127.0.0.1:<port>` for each `_forward` port and nothing else on
@@ -165,8 +248,8 @@ $FIGMA_TOKEN
   env:   withheld  matches _denyEnv "*TOKEN*"; list it in _allowEnv to pass it through
 ```
 
-A target is a path, a host (`example.com`, `example.com:22`, a URL), or a
-variable (`'$NAME'`, or a name in capitals). Inside a session it explains that
+A target is a path, a host (`example.com`, `example.com:22`, a URL), or an
+environment variable (`'$NAME'`, or a name in capitals). Inside a session it explains that
 session; on the host it starts a session for the project (`-p`, or the one
 whose `_root` holds the working directory) and asks from there. It also
 recognises the cases that look like something else: a path hidden by
@@ -191,10 +274,10 @@ At launch srtbox runs `from` on the host (a shell string or an argv array) and
 hands the value to srt as a masked credential. The sandbox sees a per-session
 placeholder; srt's proxy replaces it with the real value only in requests to
 `hosts`, which must be in `allowedDomains`. A command that fails leaves the
-variable out, with a warning.
+environment variable out, with a warning, and the launch continues.
 
 To see inside those requests srt terminates their TLS with a per-session CA,
-and points the sandbox's trust variables (`SSL_CERT_FILE`,
+and points the sandbox's trust environment variables (`SSL_CERT_FILE`,
 `NODE_EXTRA_CA_CERTS` and others) at it. srtbox excludes every other allowed
 host from termination, so they keep end-to-end TLS. A wildcard entry that also
 covers an injection host, such as `*.github.com`, stays terminated.
@@ -263,7 +346,7 @@ names programs whose matching commands run on the host instead:
 A rule is a list of command words that must be the first arguments, with
 nothing before them: `["aws", "logs"]` matches `bz aws logs --env stg` but not
 `bz --env stg aws logs`. srtbox cannot know which of a program's flags take a
-value, so it does not skip any. `host` rules run straight away. `approve` rules
+value, so it does not skip any. `host` rules run immediately. `approve` rules
 ask first, and any matching `approve` rule wins over `host` rules. Anything else
 runs the real program inside the sandbox as usual.
 
@@ -279,10 +362,9 @@ runs the real program inside the sandbox as usual.
 Inside, a directory first on `PATH` holds a link named after each program, so
 `bz …` reaches the broker while `./bin/bz …` runs the real program directly.
 Brokered commands run with the full host environment, tokens included, in the
-caller's directory
-(kept within `_root`), on a pseudo-terminal when the caller has one. The
-broker is part of the `srtbox` process that launched the session, so it lives
-exactly as long as the session.
+caller's directory (kept within `_root`), on a pseudo-terminal when the caller
+has one. The broker is part of the `srtbox` process that launched the session,
+so it stops when the session ends.
 
 **Approvals.** An `approve` command waits for your answer, given through a
 desktop notification (`notify-send` on Linux, a dialog on macOS) or by running
@@ -324,7 +406,7 @@ resizes there.
 
 On macOS a host dev server or REPL is reachable only with
 `"allowLocalBinding": true` in `network`, and that opens every loopback port,
-not just the `_forward` ones. Seatbelt fixes its rules at launch and srt has no
+not only the `_forward` ones. Seatbelt fixes its rules at launch and srt has no
 per-port loopback setting, so srtbox cannot narrow it. Linux needs no such
 setting.
 
@@ -339,6 +421,20 @@ sockets (the broker's and the `--ssh` agents'), sockets in the session's
 Seatbelt lets a sandbox connect to a socket whose path it cannot read, so with
 every socket allowed the login ssh-agent would stay usable. List any other
 socket a project needs, such as Docker's, in `allowUnixSockets`.
+
+To use `examples/base.json` on macOS, change these entries:
+
+- Fetch Claude Code's token with `security find-generic-password -a "$USER" -s
+  srtbox-claude-token -w` instead of `secret-tool`.
+- Tools keep their caches under `~/Library/Caches` rather than `~/.cache`, for
+  example `~/Library/Caches/go-build`. Allow the macOS paths.
+- The `${XDG_RUNTIME_DIR}` entries drop out on their own, because macOS doesn't
+  set that environment variable.
+
+Some tools on macOS ignore `TMPDIR` and write to the per-user temporary
+directory under `/var/folders`, which the sandbox can't write. babashka is one.
+Allowing that directory would expose every host process's temporary files, so
+configure the tool to use `TMPDIR` instead.
 
 ## Limits
 
