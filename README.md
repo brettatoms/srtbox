@@ -396,6 +396,9 @@ runs the real program inside the sandbox as usual.
 
 Inside, a directory first on `PATH` holds a link named after each program, so
 `bz …` reaches the broker while `./bin/bz …` runs the real program directly.
+On Linux the link reaches the broker over a Unix socket, which needs
+`"allowAllUnixSockets": true` in `network`. Without it every brokered command
+runs inside the sandbox, with a warning.
 Brokered commands run with the full host environment, tokens included, in the
 caller's directory (kept within `_root`), on a pseudo-terminal when the caller
 has one. The broker is part of the `srtbox` process that launched the session,

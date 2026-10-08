@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"syscall"
 )
 
@@ -20,7 +21,7 @@ const (
 // ClientMain runs inside the sandbox when srtbox is invoked as a brokered
 // program's name. The host decides: it runs the command and relays it, or
 // says to run the real program here. When the broker cannot be reached the
-// command runs here, which the sandbox allows anyway.
+// command runs here with a warning, which the sandbox allows anyway.
 func ClientMain(name string, args []string) int {
 	var paths map[string]string
 	json.Unmarshal([]byte(os.Getenv(EnvPrograms)), &paths)
@@ -37,6 +38,11 @@ func ClientMain(name string, args []string) int {
 
 	conn, err := net.Dial("unix", os.Getenv(EnvSocket))
 	if err != nil {
+		hint := ""
+		if runtime.GOOS == "linux" {
+			hint = `; on Linux it needs "allowAllUnixSockets": true in network`
+		}
+		fmt.Fprintf(os.Stderr, "srtbox: cannot reach the broker (%v)%s; running %s in the sandbox\n", err, hint, name)
 		return local()
 	}
 	defer conn.Close()
