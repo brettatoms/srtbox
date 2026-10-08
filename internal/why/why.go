@@ -70,7 +70,9 @@ func kind(a string) string {
 	case strings.HasPrefix(a, "/"), strings.HasPrefix(a, "~"), strings.HasPrefix(a, "."):
 		return "path"
 	}
-	if _, err := os.Lstat(a); err == nil {
+	// Any error but "does not exist" means something is there: macOS refuses
+	// to look up a denied file.
+	if _, err := os.Lstat(a); !errors.Is(err, os.ErrNotExist) {
 		return "path"
 	}
 	if capsName.MatchString(a) {

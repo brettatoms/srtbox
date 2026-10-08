@@ -24,6 +24,18 @@ func TestKind(t *testing.T) {
 	}
 }
 
+func TestKindTreatsAHiddenNameAsAPath(t *testing.T) {
+	// macOS refuses to look up a denied file, which an unsearchable directory
+	// reproduces.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	os.Chmod(dir, 0o000)
+	defer os.Chmod(dir, 0o755)
+	if got := kind("secrets.json"); got != "path" {
+		t.Errorf("kind(secrets.json) = %s, want path", got)
+	}
+}
+
 func TestDomainMatch(t *testing.T) {
 	cases := []struct {
 		host    string
