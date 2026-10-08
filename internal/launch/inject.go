@@ -32,8 +32,9 @@ type injection struct {
 
 // inject fetches each _inject value on the host and masks it inside: the
 // sandbox sees a placeholder, which srt's proxy swaps for the real value only
-// on HTTPS requests to the entry's hosts. srt sees those requests only by
-// terminating their TLS, so termination is switched on with every other
+// on HTTPS requests to the entry's hosts. credentials.files entries in mask
+// mode work the same way for a file's contents. srt sees those requests only
+// by terminating their TLS, so termination is switched on with every other
 // allowed host excluded. It returns the environment to hand srt.
 func inject(raw map[string]any, settings map[string]any) ([]string, error) {
 	names := make([]string, 0, len(raw))
@@ -72,6 +73,22 @@ func inject(raw map[string]any, settings map[string]any) ([]string, error) {
 		env = append(env, name+"="+val)
 		config.SetEnvMask(settings, name, in.Hosts)
 		hosts = append(hosts, in.Hosts...)
+	}
+	for _, f := range policy.CredentialFiles(settings) {
+		if f.Mode != "mask" {
+			continue
+		}
+		// Without injectHosts srt would send the file to every allowed host,
+		// and every allowed host would have to be terminated.
+		if len(f.InjectHosts) == 0 {
+			return nil, fmt.Errorf("credentials.files %s: a mask entry needs injectHosts", f.Path)
+		}
+		for _, h := range f.InjectHosts {
+			if !slices.ContainsFunc(allowed, func(a string) bool { return coversHost(a, h) }) {
+				return nil, fmt.Errorf("credentials.files %s: %s is not in allowedDomains", f.Path, h)
+			}
+		}
+		hosts = append(hosts, f.InjectHosts...)
 	}
 	if len(hosts) > 0 {
 		terminateOnly(settings, allowed, hosts)

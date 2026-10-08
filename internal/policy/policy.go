@@ -90,8 +90,7 @@ func New(project string, meta config.Meta, settings map[string]any) (*Policy, er
 // CredentialFile is one credentials.files entry. srt makes a "deny" file
 // unreadable and unwritable. On Linux it replaces a "mask" file with a
 // read-only placeholder that its proxy swaps for the real value in requests
-// to InjectHosts (every allowed host when empty); on macOS "mask" acts as
-// "deny".
+// to InjectHosts; on macOS "mask" acts as "deny".
 type CredentialFile struct {
 	Path, Mode  string
 	InjectHosts []string

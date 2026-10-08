@@ -148,9 +148,6 @@ func TestPathBlamesACredentialsFileEntry(t *testing.T) {
 			`read:  masked    credentials.files "` + f + `" (base.json): the sandbox reads a placeholder, which srt swaps for the real value only in requests to api.example.com`,
 			`write: no        masked by credentials.files "` + f + `" (base.json)`,
 		}},
-		{"mask without injectHosts", "linux", map[string]any{"mode": "mask"}, 0o444, []string{
-			"only in requests to any allowed host",
-		}},
 		{"mask on macOS", "darwin", map[string]any{"mode": "mask"}, 0o000, []string{
 			`read:  no        hidden by credentials.files "` + f + `" (base.json); srt treats mask as deny on macOS`,
 		}},

@@ -110,11 +110,8 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 		case f.Mode == "mask" && pol.OS == "darwin":
 			hidden = "hidden by " + src + "; srt treats mask as deny on macOS"
 		case f.Mode == "mask":
-			hosts := "any allowed host"
-			if len(f.InjectHosts) > 0 {
-				hosts = strings.Join(f.InjectHosts, ", ")
-			}
-			maskRead = src + ": the sandbox reads a placeholder, which srt swaps for the real value only in requests to " + hosts
+			maskRead = src + ": the sandbox reads a placeholder, which srt swaps for the real value only in requests to " +
+				strings.Join(f.InjectHosts, ", ")
 			maskWrite = "masked by " + src
 		}
 	}

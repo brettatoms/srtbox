@@ -52,6 +52,40 @@ func TestInjectMasksAndTerminatesOnlyItsHosts(t *testing.T) {
 	}
 }
 
+func TestMaskedFilesTerminateOnlyTheirHosts(t *testing.T) {
+	settings := map[string]any{
+		"network": map[string]any{"allowedDomains": []any{"api.example.com", "github.com"}},
+		"credentials": map[string]any{"files": []any{
+			map[string]any{"path": "~/.token", "mode": "mask", "injectHosts": []any{"api.example.com"}},
+			map[string]any{"path": "~/.secret", "mode": "deny"},
+		}},
+	}
+	if _, err := inject(nil, settings); err != nil {
+		t.Fatal(err)
+	}
+	exclude := settings["network"].(map[string]any)["tlsTerminate"].(map[string]any)["excludeDomains"]
+	if !reflect.DeepEqual(exclude, []any{"github.com"}) {
+		t.Errorf("excludeDomains %v", exclude)
+	}
+}
+
+func TestMaskedFilesNeedAllowedInjectHosts(t *testing.T) {
+	for want, hosts := range map[string][]any{"needs injectHosts": nil, "evil.example": {"evil.example"}} {
+		entry := map[string]any{"path": "~/.token", "mode": "mask"}
+		if hosts != nil {
+			entry["injectHosts"] = hosts
+		}
+		settings := map[string]any{
+			"network":     map[string]any{"allowedDomains": []any{"github.com"}},
+			"credentials": map[string]any{"files": []any{entry}},
+		}
+		_, err := inject(nil, settings)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v", want, err)
+		}
+	}
+}
+
 func TestInjectRefusesHostsOutsideTheAllowlist(t *testing.T) {
 	settings := map[string]any{"network": map[string]any{"allowedDomains": []any{"github.com"}}}
 	_, err := inject(map[string]any{

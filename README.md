@@ -254,7 +254,8 @@ session; on the host it starts a session for the project (`-p`, or the one
 whose `_root` holds the working directory) and asks from there. It also
 recognises the cases that look like something else: a path hidden by
 `denyRead` reads as missing, a write under a masked directory succeeds and is
-discarded, and a write grant inside a re-opened read grant stays read-only.
+discarded, a write grant inside a re-opened read grant stays read-only, and a
+file under `credentials.files` is hidden or reads as a placeholder.
 
 At launch srtbox records the session's merged policy, with each rule's source,
 in a private session directory that the sandbox can read.
@@ -286,6 +287,25 @@ The placeholder is replaced where it appears literally, in a header or body.
 That suits API tokens sent as `Authorization: token …` or `Bearer …`, but not
 HTTP Basic auth, which base64-encodes the token first: git over HTTPS cannot
 authenticate with an injected token. Use `--ssh` for git.
+
+**Credential files.** srt's `credentials.files` protects a file. A `deny`
+entry makes it unreadable and unwritable. A `mask` entry does for a file what
+`_inject` does for an environment variable: on Linux the sandbox reads a
+read-only copy that holds a placeholder, which srt's proxy swaps for the real
+contents only in requests to `injectHosts`:
+
+```json
+"credentials": {"files": [
+  {"path": "~/.config/example/token", "mode": "mask", "injectHosts": ["api.example.com"]}
+]}
+```
+
+srtbox requires `injectHosts` on a `mask` entry, each host in
+`allowedDomains`, and terminates TLS only for those hosts, as for `_inject`.
+The placeholder replaces the whole file, which suits a file that holds only a
+token; srt's `extract` option masks part of a structured file instead. srt
+skips a `mask` entry whose file is missing or is a directory, and on macOS it
+treats `mask` as `deny`.
 
 **Claude Code's own login.** On macOS Claude Code keeps its login in the
 keychain, which the sandbox cannot reach, so Claude inside is not logged in. On
