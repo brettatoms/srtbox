@@ -101,6 +101,10 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 	denyR, allowR := deepest(pol, "denyRead", r), deepest(pol, "allowRead", r)
 	allowW, denyW := deepest(pol, "allowWrite", r), deepest(pol, "denyWrite", r)
 	masked := denyR != "" && allowR == ""
+	hidden := ""
+	if f := deniedFile(pol, r); f != "" {
+		hidden = fmt.Sprintf("hidden by credentials.files %q (%s)", f, pol.Source("credentials.files", f))
+	}
 
 	info, statErr := os.Lstat(p)
 	exists := statErr == nil
@@ -108,6 +112,8 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 	// Read.
 	readErr := probeRead(p, info, statErr)
 	switch {
+	case readErr != nil && hidden != "":
+		line(w, "read", "no", hidden)
 	case !exists && masked && pol.OS == "darwin":
 		line(w, "read", "no", rule(pol, "denyRead", denyR))
 	case !exists && masked:
@@ -135,6 +141,8 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 	}
 	writeErr := probeWrite(p, info, exists)
 	switch {
+	case writeErr != nil && hidden != "":
+		line(w, "write", "no", hidden)
 	case writeErr == nil && masked && pol.OS == "linux":
 		line(w, "write", "discarded", rule(pol, "denyRead", denyR)+" masks it with a scratch filesystem: writes succeed, then vanish when the session ends")
 	case writeErr == nil && allowW != "":
@@ -237,6 +245,16 @@ func deepest(pol *policy.Policy, key, p string) string {
 		}
 	}
 	return best
+}
+
+// deniedFile returns the credentials.files deny entry that covers p.
+func deniedFile(pol *policy.Policy, p string) string {
+	for _, e := range policy.DeniedFiles(pol.Settings) {
+		if covers(config.Home(e), p) {
+			return e
+		}
+	}
+	return ""
 }
 
 // covers reports whether rule path r applies to p: p is r or inside it. A

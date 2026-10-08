@@ -131,6 +131,24 @@ func TestPathAndEnvExplanations(t *testing.T) {
 	}
 }
 
+func TestPathBlamesACredentialsFileDeny(t *testing.T) {
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	// An unreadable file stands in for the one srt hides.
+	f := filepath.Join(dir, ".credentials.json")
+	os.WriteFile(f, nil, 0o000)
+	pol := &policy.Policy{OS: "linux", Settings: map[string]any{
+		"filesystem":  map[string]any{"allowWrite": []any{dir}},
+		"credentials": map[string]any{"files": []any{map[string]any{"path": f, "mode": "deny"}}},
+	}, Sources: map[string]map[string]string{"credentials.files": {f: "base.json"}}}
+
+	var b strings.Builder
+	Path(&b, pol, f)
+	want := `no        hidden by credentials.files "` + f + `" (base.json)`
+	if strings.Count(b.String(), want) != 2 {
+		t.Errorf("want read and write blamed on the credentials.files entry:\n%s", b.String())
+	}
+}
+
 func TestPathFollowsLinksToTheRuleThatApplies(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "cloud", ".claude")

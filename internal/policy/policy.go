@@ -54,10 +54,9 @@ func New(project string, meta config.Meta, settings map[string]any) (*Policy, er
 		name string
 		doc  map[string]any
 	}{{"base.json", base}, {project + ".json", overlay}}
-	for _, sec := range sections {
-		key := sec[0] + "." + sec[1]
+	trace := func(key string, values func(map[string]any) []string) {
 		src := map[string]string{}
-		for _, v := range Strings(settings, sec[0], sec[1]) {
+		for _, v := range values(settings) {
 			src[v] = SourceSrtbox
 		}
 		// The project file is checked last so it wins when both list a rule.
@@ -66,7 +65,7 @@ func New(project string, meta config.Meta, settings map[string]any) (*Policy, er
 				continue
 			}
 			doc := config.Expand(l.doc, os.LookupEnv).(map[string]any)
-			for _, v := range Strings(doc, sec[0], sec[1]) {
+			for _, v := range values(doc) {
 				if _, ok := src[v]; ok {
 					src[v] = l.name
 				}
@@ -74,7 +73,27 @@ func New(project string, meta config.Meta, settings map[string]any) (*Policy, er
 		}
 		p.Sources[key] = src
 	}
+	for _, sec := range sections {
+		trace(sec[0]+"."+sec[1], func(doc map[string]any) []string { return Strings(doc, sec[0], sec[1]) })
+	}
+	trace("credentials.files", DeniedFiles)
 	return p, nil
+}
+
+// DeniedFiles returns the paths of doc's credentials.files entries in deny
+// mode, which srt makes unreadable and unwritable inside the sandbox.
+func DeniedFiles(doc map[string]any) []string {
+	creds, _ := doc["credentials"].(map[string]any)
+	files, _ := creds["files"].([]any)
+	var out []string
+	for _, f := range files {
+		if e, ok := f.(map[string]any); ok && e["mode"] == "deny" {
+			if s, ok := e["path"].(string); ok {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
 }
 
 // Write saves the policy to path.
