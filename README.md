@@ -293,10 +293,25 @@ Linux it keeps it in `~/.claude/.credentials.json`, which any sandbox that can
 read `~/.claude` can read. On both, a long-lived token injected as a
 placeholder works instead:
 
-1. Run `claude setup-token` on the host and store the token it prints, for
-   example in the keychain (`security add-generic-password -a "$USER" -s
-   srtbox-claude-token -w`) or the desktop keyring (`secret-tool store
-   --label='srtbox claude token' service srtbox-claude-token`).
+1. Run `claude setup-token` on the host in a wide terminal. A narrow one wraps
+   the token across lines, and the copy picks up the breaks. The token is one
+   line of 108 characters starting with `sk-ant-oat01-`. Store it in the
+   desktop keyring or the keychain; each command prompts for the token, so it
+   stays out of your shell history:
+
+   ```sh
+   secret-tool store --label='srtbox claude token' service srtbox-claude-token  # Linux
+   security add-generic-password -a "$USER" -s srtbox-claude-token -w           # macOS
+   ```
+
+   To check it without printing it, compare its prefix and length:
+
+   ```sh
+   T="$(secret-tool lookup service srtbox-claude-token)"; [[ $T == sk-ant-oat01-* ]] && echo "prefix ok, length ${#T}"; unset T
+   ```
+
+   On macOS, use the `security find-generic-password` command below in place
+   of `secret-tool lookup`.
 2. Inject it, and on Linux hide the credentials file. `allowRead` wins over
    `denyRead`, so `credentials.files` is the way to hide one file inside an
    allowed directory:
