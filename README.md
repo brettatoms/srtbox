@@ -470,8 +470,9 @@ To use `examples/base.json` on macOS, change these entries:
   set that environment variable.
 
 Some tools on macOS ignore `TMPDIR` and write to the per-user temporary
-directory under `/var/folders`, which the sandbox can't write. babashka is one,
-and so is `mktemp` without a template; `mktemp "$TMPDIR/name.XXXXXX"` works.
+directory under `/var/folders`, which the sandbox can't write. babashka is one.
+On some macOS versions, such as the macOS 26 image GitHub's runners use, so is
+`mktemp` without a template; `mktemp "$TMPDIR/name.XXXXXX"` works everywhere.
 Allowing that directory would expose every host process's temporary files, so
 configure the tool to use `TMPDIR` instead.
 
