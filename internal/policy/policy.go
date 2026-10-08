@@ -4,6 +4,7 @@ package policy
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"runtime"
 
@@ -76,22 +77,44 @@ func New(project string, meta config.Meta, settings map[string]any) (*Policy, er
 	for _, sec := range sections {
 		trace(sec[0]+"."+sec[1], func(doc map[string]any) []string { return Strings(doc, sec[0], sec[1]) })
 	}
-	trace("credentials.files", DeniedFiles)
+	trace("credentials.files", func(doc map[string]any) []string {
+		var paths []string
+		for _, f := range CredentialFiles(doc) {
+			paths = append(paths, f.Path)
+		}
+		return paths
+	})
 	return p, nil
 }
 
-// DeniedFiles returns the paths of doc's credentials.files entries in deny
-// mode, which srt makes unreadable and unwritable inside the sandbox.
-func DeniedFiles(doc map[string]any) []string {
+// CredentialFile is one credentials.files entry. srt makes a "deny" file
+// unreadable and unwritable. On Linux it replaces a "mask" file with a
+// read-only placeholder that its proxy swaps for the real value in requests
+// to InjectHosts (every allowed host when empty); on macOS "mask" acts as
+// "deny".
+type CredentialFile struct {
+	Path, Mode  string
+	InjectHosts []string
+}
+
+// CredentialFiles returns doc's credentials.files entries.
+func CredentialFiles(doc map[string]any) []CredentialFile {
 	creds, _ := doc["credentials"].(map[string]any)
 	files, _ := creds["files"].([]any)
-	var out []string
+	var out []CredentialFile
 	for _, f := range files {
-		if e, ok := f.(map[string]any); ok && e["mode"] == "deny" {
-			if s, ok := e["path"].(string); ok {
-				out = append(out, s)
-			}
+		e, _ := f.(map[string]any)
+		path, ok := e["path"].(string)
+		if !ok {
+			continue
 		}
+		mode, _ := e["mode"].(string)
+		cf := CredentialFile{Path: path, Mode: mode}
+		hosts, _ := e["injectHosts"].([]any)
+		for _, h := range hosts {
+			cf.InjectHosts = append(cf.InjectHosts, fmt.Sprint(h))
+		}
+		out = append(out, cf)
 	}
 	return out
 }

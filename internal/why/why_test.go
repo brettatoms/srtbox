@@ -131,21 +131,45 @@ func TestPathAndEnvExplanations(t *testing.T) {
 	}
 }
 
-func TestPathBlamesACredentialsFileDeny(t *testing.T) {
+func TestPathBlamesACredentialsFileEntry(t *testing.T) {
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
-	// An unreadable file stands in for the one srt hides.
 	f := filepath.Join(dir, ".credentials.json")
-	os.WriteFile(f, nil, 0o000)
-	pol := &policy.Policy{OS: "linux", Settings: map[string]any{
-		"filesystem":  map[string]any{"allowWrite": []any{dir}},
-		"credentials": map[string]any{"files": []any{map[string]any{"path": f, "mode": "deny"}}},
-	}, Sources: map[string]map[string]string{"credentials.files": {f: "base.json"}}}
+	for _, c := range []struct {
+		name, os string
+		entry    map[string]any
+		perm     os.FileMode // stands in for what srt does to the file
+		want     []string
+	}{
+		{"deny", "linux", map[string]any{"mode": "deny"}, 0o000, []string{
+			`read:  no        hidden by credentials.files "` + f + `" (base.json)`,
+			`write: no        hidden by credentials.files "` + f + `" (base.json)`,
+		}},
+		{"mask", "linux", map[string]any{"mode": "mask", "injectHosts": []any{"api.example.com"}}, 0o444, []string{
+			`read:  masked    credentials.files "` + f + `" (base.json): the sandbox reads a placeholder, which srt swaps for the real value only in requests to api.example.com`,
+			`write: no        masked by credentials.files "` + f + `" (base.json)`,
+		}},
+		{"mask without injectHosts", "linux", map[string]any{"mode": "mask"}, 0o444, []string{
+			"only in requests to any allowed host",
+		}},
+		{"mask on macOS", "darwin", map[string]any{"mode": "mask"}, 0o000, []string{
+			`read:  no        hidden by credentials.files "` + f + `" (base.json); srt treats mask as deny on macOS`,
+		}},
+	} {
+		os.Remove(f)
+		os.WriteFile(f, []byte("x"), c.perm)
+		c.entry["path"] = f
+		pol := &policy.Policy{OS: c.os, Settings: map[string]any{
+			"filesystem":  map[string]any{"allowWrite": []any{dir}},
+			"credentials": map[string]any{"files": []any{c.entry}},
+		}, Sources: map[string]map[string]string{"credentials.files": {f: "base.json"}}}
 
-	var b strings.Builder
-	Path(&b, pol, f)
-	want := `no        hidden by credentials.files "` + f + `" (base.json)`
-	if strings.Count(b.String(), want) != 2 {
-		t.Errorf("want read and write blamed on the credentials.files entry:\n%s", b.String())
+		var b strings.Builder
+		Path(&b, pol, f)
+		for _, want := range c.want {
+			if !strings.Contains(b.String(), want) {
+				t.Errorf("%s: missing %q in:\n%s", c.name, want, b.String())
+			}
+		}
 	}
 }
 

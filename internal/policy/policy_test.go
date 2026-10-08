@@ -14,12 +14,16 @@ func TestSourcesNameTheFileEachRuleCameFrom(t *testing.T) {
 	t.Setenv("SRTBOX_TEST_DIR", "/data")
 	os.WriteFile(filepath.Join(conf, "base.json"), []byte(`{"filesystem":{"denyRead":["~"],"allowRead":["/shared"]},
 		"credentials":{"files":[{"path":"~/.secret","mode":"deny"}]}}`), 0o600)
-	os.WriteFile(filepath.Join(conf, "p.json"), []byte(`{"filesystem":{"allowRead":["/shared","${SRTBOX_TEST_DIR}"]}}`), 0o600)
+	os.WriteFile(filepath.Join(conf, "p.json"), []byte(`{"filesystem":{"allowRead":["/shared","${SRTBOX_TEST_DIR}"]},
+		"credentials":{"files":[{"path":"~/.token","mode":"mask"}]}}`), 0o600)
 	settings := map[string]any{
 		"filesystem": map[string]any{
 			"denyRead": []any{"~"}, "allowRead": []any{"/shared", "/data", "/added"},
 		},
-		"credentials": map[string]any{"files": []any{map[string]any{"path": "~/.secret", "mode": "deny"}}},
+		"credentials": map[string]any{"files": []any{
+			map[string]any{"path": "~/.secret", "mode": "deny"},
+			map[string]any{"path": "~/.token", "mode": "mask"},
+		}},
 	}
 
 	p, err := New("p", config.Meta{}, settings)
@@ -32,6 +36,7 @@ func TestSourcesNameTheFileEachRuleCameFrom(t *testing.T) {
 		{"filesystem.allowRead", "/data", "p.json"},   // matched after ${VAR} expansion
 		{"filesystem.allowRead", "/added", SourceSrtbox},
 		{"credentials.files", "~/.secret", "base.json"},
+		{"credentials.files", "~/.token", "p.json"},
 	} {
 		if got := p.Source(c.section, c.value); got != c.want {
 			t.Errorf("%s %s: got %q, want %q", c.section, c.value, got, c.want)

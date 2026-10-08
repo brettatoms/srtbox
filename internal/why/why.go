@@ -101,9 +101,22 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 	denyR, allowR := deepest(pol, "denyRead", r), deepest(pol, "allowRead", r)
 	allowW, denyW := deepest(pol, "allowWrite", r), deepest(pol, "denyWrite", r)
 	masked := denyR != "" && allowR == ""
-	hidden := ""
-	if f := deniedFile(pol, r); f != "" {
-		hidden = fmt.Sprintf("hidden by credentials.files %q (%s)", f, pol.Source("credentials.files", f))
+	var hidden, maskRead, maskWrite string
+	if f, ok := credentialFile(pol, r); ok {
+		src := fmt.Sprintf("credentials.files %q (%s)", f.Path, pol.Source("credentials.files", f.Path))
+		switch {
+		case f.Mode == "deny":
+			hidden = "hidden by " + src
+		case f.Mode == "mask" && pol.OS == "darwin":
+			hidden = "hidden by " + src + "; srt treats mask as deny on macOS"
+		case f.Mode == "mask":
+			hosts := "any allowed host"
+			if len(f.InjectHosts) > 0 {
+				hosts = strings.Join(f.InjectHosts, ", ")
+			}
+			maskRead = src + ": the sandbox reads a placeholder, which srt swaps for the real value only in requests to " + hosts
+			maskWrite = "masked by " + src
+		}
 	}
 
 	info, statErr := os.Lstat(p)
@@ -114,6 +127,8 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 	switch {
 	case readErr != nil && hidden != "":
 		line(w, "read", "no", hidden)
+	case readErr == nil && maskRead != "":
+		line(w, "read", "masked", maskRead)
 	case !exists && masked && pol.OS == "darwin":
 		line(w, "read", "no", rule(pol, "denyRead", denyR))
 	case !exists && masked:
@@ -143,6 +158,8 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 	switch {
 	case writeErr != nil && hidden != "":
 		line(w, "write", "no", hidden)
+	case writeErr != nil && maskWrite != "":
+		line(w, "write", "no", maskWrite)
 	case writeErr == nil && masked && pol.OS == "linux":
 		line(w, "write", "discarded", rule(pol, "denyRead", denyR)+" masks it with a scratch filesystem: writes succeed, then vanish when the session ends")
 	case writeErr == nil && allowW != "":
@@ -247,14 +264,17 @@ func deepest(pol *policy.Policy, key, p string) string {
 	return best
 }
 
-// deniedFile returns the credentials.files deny entry that covers p.
-func deniedFile(pol *policy.Policy, p string) string {
-	for _, e := range policy.DeniedFiles(pol.Settings) {
-		if covers(config.Home(e), p) {
-			return e
+// credentialFile returns the credentials.files entry that applies to p. On
+// Linux srt skips a mask entry that names a directory, so one applies only
+// to its own path.
+func credentialFile(pol *policy.Policy, p string) (policy.CredentialFile, bool) {
+	for _, f := range policy.CredentialFiles(pol.Settings) {
+		r := config.Home(f.Path)
+		if r == p || covers(r, p) && (f.Mode == "deny" || pol.OS == "darwin") {
+			return f, true
 		}
 	}
-	return ""
+	return policy.CredentialFile{}, false
 }
 
 // covers reports whether rule path r applies to p: p is r or inside it. A
