@@ -11,7 +11,8 @@ check "SRTBOX_PROJECT and SRTBOX_ROOT are set" "launch $T/launch" \
 check "list names the project" launch srtbox list
 check "show prints what srtbox adds" "\"$T/bin/srtbox\"" srtbox show launch
 
-out=$(sbx launch sh -c 'echo "tmp=$TMPDIR"; f=$(mktemp) && echo "mktemp=$f"' 2>&1)
+# mktemp gets an explicit template: on macOS a bare mktemp can ignore TMPDIR.
+out=$(sbx launch sh -c 'echo "tmp=$TMPDIR"; f=$(mktemp "$TMPDIR/e2e.XXXXXX") && echo "mktemp=$f"' 2>&1)
 tmp=$(printf '%s\n' "$out" | sed -n 's/^tmp=//p')
 check "TMPDIR is a per-session directory" /srtbox-tmp- echo "$tmp"
 check "mktemp works in TMPDIR" "mktemp=$tmp/" echo "$out"
