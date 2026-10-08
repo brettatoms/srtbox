@@ -121,16 +121,8 @@ func readJSON(path string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	plain, err := jsonc(b)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
 	var doc map[string]any
-	if err := json.Unmarshal(plain, &doc); err != nil {
-		var se *json.SyntaxError
-		if errors.As(err, &se) {
-			return nil, fmt.Errorf("%s: line %d: %w", path, lineOf(b, int(se.Offset)-1), err)
-		}
+	if err := json.Unmarshal(b, &doc); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return doc, nil
