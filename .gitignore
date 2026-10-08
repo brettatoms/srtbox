@@ -4,3 +4,4 @@
 devenv.local.nix
 /srtbox
 /dist/
+/tests/e2e/node_modules/

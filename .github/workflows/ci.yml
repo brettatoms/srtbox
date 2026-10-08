@@ -37,3 +37,36 @@ jobs:
           for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
             CGO_ENABLED=0 GOOS="${t%/*}" GOARCH="${t#*/}" go build -o /dev/null .
           done
+
+  e2e:
+    name: e2e (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read # check out the code
+    env:
+      SRTBOX_E2E_NETWORK: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: srt's Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap socat ripgrep
+          # Ubuntu strips capabilities from unprivileged user namespaces, and
+          # bubblewrap needs them.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: install srt
+        working-directory: tests/e2e
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: SRTBOX_SRT="$PWD/tests/e2e/node_modules/.bin/srt" tests/e2e/run.sh
