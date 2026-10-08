@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,9 +29,17 @@ func Dir() string {
 	return filepath.Join(home, ".config", "srtbox")
 }
 
+// DefaultProject is the project for a working directory that no project's
+// _root contains. Unless <DefaultProject>.json exists, its overlay is
+// generated: the working directory as the root, readable and writable.
+const DefaultProject = "default"
+
 // Projects lists the overlays in Dir, without their .json suffix.
 func Projects() ([]string, error) {
 	entries, err := os.ReadDir(Dir())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +56,8 @@ func Projects() ([]string, error) {
 }
 
 // ProjectFor returns the project whose _root contains dir. When roots nest,
-// the deepest one wins.
+// the deepest one wins. With none, it returns DefaultProject, unless a
+// project file of that name exists.
 func ProjectFor(dir string) (string, error) {
 	names, err := Projects()
 	if err != nil {
@@ -68,9 +78,67 @@ func ProjectFor(dir string) (string, error) {
 		}
 	}
 	if best == "" {
-		return "", fmt.Errorf("no project's _root contains %s; pass -p <project>", dir)
+		if slices.Contains(names, DefaultProject) {
+			return "", fmt.Errorf("no project's _root contains %s; pass -p <project>", dir)
+		}
+		return DefaultProject, nil
 	}
 	return best, nil
+}
+
+// Generated reports whether project's overlay is generated rather than read
+// from a file.
+func Generated(project string) bool {
+	if project != DefaultProject {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(Dir(), project+".json"))
+	return errors.Is(err, os.ErrNotExist)
+}
+
+// defaultOverlay grants the working directory. It refuses one that holds the
+// home directory, or that holds or sits inside srtbox's config, which the
+// sandbox could then rewrite to loosen later sessions or run code on the host.
+func defaultOverlay() (map[string]any, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	conf := []string{Dir()}
+	if real, err := filepath.EvalSymlinks(Dir()); err == nil {
+		conf = append(conf, real)
+	}
+	files, _ := filepath.Glob(filepath.Join(Dir(), "*.json"))
+	for _, f := range files {
+		if real, err := filepath.EvalSymlinks(f); err == nil {
+			conf = append(conf, real)
+		}
+	}
+	dirs := []string{cwd}
+	if real, err := filepath.EvalSymlinks(cwd); err == nil {
+		dirs = append(dirs, real)
+	}
+	refuse := func(why string) error {
+		return fmt.Errorf("no project's _root contains %s, and srtbox won't grant it: %s; pass -p <project>", cwd, why)
+	}
+	home, _ := os.UserHomeDir()
+	for _, d := range dirs {
+		if home != "" && Within(home, d) {
+			return nil, refuse("it holds the home directory")
+		}
+		for _, c := range conf {
+			if Within(c, d) || Within(d, c) {
+				return nil, refuse("it overlaps srtbox's config at " + c)
+			}
+		}
+	}
+	return map[string]any{
+		"_root": cwd,
+		"filesystem": map[string]any{
+			"allowRead":  []any{cwd},
+			"allowWrite": []any{cwd},
+		},
+	}, nil
 }
 
 // Within reports whether path is root or below it.
@@ -101,7 +169,11 @@ func Load(project string) (map[string]any, error) {
 
 // Layers returns base.json (nil when absent) and <project>.json, unmerged.
 func Layers(project string) (base, overlay map[string]any, err error) {
-	overlay, err = readJSON(filepath.Join(Dir(), project+".json"))
+	if Generated(project) {
+		overlay, err = defaultOverlay()
+	} else {
+		overlay, err = readJSON(filepath.Join(Dir(), project+".json"))
+	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			names, _ := Projects()

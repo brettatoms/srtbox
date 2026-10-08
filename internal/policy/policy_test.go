@@ -43,3 +43,18 @@ func TestSourcesNameTheFileEachRuleCameFrom(t *testing.T) {
 		}
 	}
 }
+
+func TestSourcesNameTheDefaultProject(t *testing.T) {
+	t.Setenv("SRTBOX_CONFIG_DIR", t.TempDir())
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Chdir(dir)
+	settings := map[string]any{"filesystem": map[string]any{"allowWrite": []any{dir}}}
+
+	p, err := New(config.DefaultProject, config.Meta{}, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Source("filesystem.allowWrite", dir); got != SourceDefault {
+		t.Errorf("got %q, want %q", got, SourceDefault)
+	}
+}

@@ -81,6 +81,15 @@ srtbox version
 Without `-p`, `run` and `show` use the project whose `_root` contains the
 working directory, the deepest one if roots nest.
 
+When no project's `_root` contains it, they warn and use the `default`
+project: `base.json`, with the working directory as `_root` and readable and
+writable. srtbox refuses this for a directory that holds your home directory,
+or that holds or sits inside the config directory, since the sandbox could
+rewrite its own policy there. Without `base.json` the default project can read
+your whole home directory and reach no hosts, and srtbox warns about that too.
+A project file named `default.json` turns the fallback off: outside every
+root, `run` and `show` then fail and ask for `-p`.
+
 ## Configuration
 
 Policy lives in `$XDG_CONFIG_HOME/srtbox`, by default `~/.config/srtbox`

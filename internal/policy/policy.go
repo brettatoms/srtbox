@@ -15,7 +15,10 @@ import (
 const Env = "SRTBOX_POLICY"
 
 // Sources of a rule, besides the config files.
-const SourceSrtbox = "added by srtbox at launch"
+const (
+	SourceSrtbox  = "added by srtbox at launch"
+	SourceDefault = "default project, for a directory no _root contains"
+)
 
 // Policy is the merged settings srt received, plus the srtbox meta keys and
 // the source of each rule.
@@ -51,10 +54,14 @@ func New(project string, meta config.Meta, settings map[string]any) (*Policy, er
 		Forward: meta.Forward, DenyEnv: meta.DenyEnv, AllowEnv: meta.AllowEnv,
 		Sources: map[string]map[string]string{},
 	}
+	overlayName := project + ".json"
+	if config.Generated(project) {
+		overlayName = SourceDefault
+	}
 	layers := []struct {
 		name string
 		doc  map[string]any
-	}{{"base.json", base}, {project + ".json", overlay}}
+	}{{"base.json", base}, {overlayName, overlay}}
 	trace := func(key string, values func(map[string]any) []string) {
 		src := map[string]string{}
 		for _, v := range values(settings) {

@@ -91,6 +91,7 @@ func Main(args []string) int {
 		fmt.Fprintln(os.Stderr, "srtbox:", err)
 		return 1
 	}
+	warnDefault(project, meta.Root)
 	if meta.Root != "" {
 		if cwd, _ := os.Getwd(); !config.Within(cwd, meta.Root) {
 			fmt.Fprintf(os.Stderr, "srtbox: warning: cwd is outside %s; the sandbox grants that tree, not this one\n", meta.Root)
@@ -285,6 +286,7 @@ func Show(project string) int {
 		fmt.Fprintln(os.Stderr, "srtbox:", err)
 		return 1
 	}
+	warnDefault(project, meta.Root)
 	scopeLoopback(meta.Forward, meta.Root, settings)
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
@@ -356,6 +358,18 @@ func resolveProject(project string) (string, error) {
 		return "", err
 	}
 	return config.ProjectFor(cwd)
+}
+
+// warnDefault says when the session runs under the generated default project,
+// and what it lacks without base.json.
+func warnDefault(project, root string) {
+	if !config.Generated(project) {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "srtbox: warning: no project's _root contains %s; using base.json with it as the root\n", root)
+	if _, err := os.Stat(filepath.Join(config.Dir(), "base.json")); errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintln(os.Stderr, "srtbox: warning: no base.json, so the sandbox can read all of your home directory and reach no hosts")
+	}
 }
 
 // tempDir creates the session's own TMPDIR and makes it writable inside. srt

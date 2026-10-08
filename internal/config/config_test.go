@@ -163,8 +163,82 @@ func TestProjectForPicksTheDeepestRoot(t *testing.T) {
 			t.Errorf("ProjectFor(%q) = %q, %v; want %q", dir, got, err, want)
 		}
 	}
+	if got, err := ProjectFor("/elsewhere"); err != nil || got != DefaultProject {
+		t.Errorf("ProjectFor outside every root = %q, %v; want %q", got, err, DefaultProject)
+	}
+
+	// A project of that name is a real project, so outside every root there is
+	// nothing to fall back to.
+	os.WriteFile(filepath.Join(conf, DefaultProject+".json"), []byte(`{"_root":"/d"}`), 0o600)
 	if _, err := ProjectFor("/elsewhere"); err == nil {
-		t.Error("no error outside every root")
+		t.Errorf("no error outside every root with %s.json present", DefaultProject)
+	}
+}
+
+func TestProjectForWithoutConfigDir(t *testing.T) {
+	t.Setenv("SRTBOX_CONFIG_DIR", filepath.Join(t.TempDir(), "missing"))
+	if got, err := ProjectFor("/elsewhere"); err != nil || got != DefaultProject {
+		t.Errorf("ProjectFor = %q, %v; want %q", got, err, DefaultProject)
+	}
+}
+
+func TestDefaultLayersGrantTheWorkingDirectory(t *testing.T) {
+	tmp, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	t.Setenv("SRTBOX_CONFIG_DIR", filepath.Join(tmp, "home", ".config", "srtbox"))
+	dir := filepath.Join(tmp, "work")
+	os.MkdirAll(dir, 0o755)
+	t.Chdir(dir)
+
+	if !Generated(DefaultProject) {
+		t.Error("Generated is false without a file")
+	}
+	base, overlay, err := Layers(DefaultProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base != nil {
+		t.Errorf("base = %v; want nil without base.json", base)
+	}
+	m, settings := Split(overlay)
+	if m.Root != dir {
+		t.Errorf("_root = %q; want %q", m.Root, dir)
+	}
+	for _, k := range []string{"allowRead", "allowWrite"} {
+		if got := strs(get(settings, "filesystem", k)); !reflect.DeepEqual(got, []string{dir}) {
+			t.Errorf("%s = %v; want [%s]", k, got, dir)
+		}
+	}
+}
+
+func TestDefaultRefusesDirsHoldingHomeOrConfig(t *testing.T) {
+	tmp, _ := filepath.EvalSymlinks(t.TempDir())
+	home := filepath.Join(tmp, "home")
+	dotfiles := filepath.Join(home, "dotfiles")
+	os.MkdirAll(filepath.Join(dotfiles, "srtbox", "brokers"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".config"), 0o755)
+	os.Symlink(filepath.Join(dotfiles, "srtbox"), filepath.Join(home, ".config", "srtbox"))
+	t.Setenv("HOME", home)
+	t.Setenv("SRTBOX_CONFIG_DIR", filepath.Join(home, ".config", "srtbox"))
+
+	brokers := filepath.Join(home, ".config", "srtbox", "brokers")
+	for _, dir := range []string{tmp, home, filepath.Join(home, ".config"), dotfiles, brokers} {
+		t.Chdir(dir)
+		if _, _, err := Layers(DefaultProject); err == nil {
+			t.Errorf("no error with the working directory at %s", dir)
+		}
+	}
+}
+
+func TestGeneratedIsFalseForAProjectFile(t *testing.T) {
+	conf := t.TempDir()
+	t.Setenv("SRTBOX_CONFIG_DIR", conf)
+	os.WriteFile(filepath.Join(conf, DefaultProject+".json"), []byte(`{}`), 0o600)
+	if Generated(DefaultProject) {
+		t.Errorf("Generated is true with %s.json present", DefaultProject)
+	}
+	if Generated("other") {
+		t.Error("Generated is true for another project")
 	}
 }
 

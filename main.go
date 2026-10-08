@@ -31,7 +31,7 @@ Usage:
 Policy lives in $XDG_CONFIG_HOME/srtbox, by default ~/.config/srtbox:
 base.json applies to every project, and <project>.json overlays it.
 Without -p, run and show use the project whose _root contains the working
-directory.
+directory, or else base.json with the working directory as the root.
 
 --ssh opens a host for the session through a throwaway ssh-agent holding only
 that host's key; repeat it for more hosts, and put --key after the --ssh it is
