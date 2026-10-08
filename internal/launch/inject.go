@@ -132,7 +132,8 @@ func terminateOnly(settings map[string]any, allowed, hosts []string) {
 	if tls == nil {
 		tls = map[string]any{}
 	}
-	var exclude []any
+	// Never nil: srt rejects a null excludeDomains.
+	exclude := []any{}
 	if have, ok := tls["excludeDomains"].([]any); ok {
 		exclude = have
 	}

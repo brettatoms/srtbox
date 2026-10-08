@@ -1,6 +1,7 @@
 package launch
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -66,6 +67,20 @@ func TestMaskedFilesTerminateOnlyTheirHosts(t *testing.T) {
 	exclude := settings["network"].(map[string]any)["tlsTerminate"].(map[string]any)["excludeDomains"]
 	if !reflect.DeepEqual(exclude, []any{"github.com"}) {
 		t.Errorf("excludeDomains %v", exclude)
+	}
+}
+
+func TestTerminatingEveryAllowedHostExcludesNone(t *testing.T) {
+	settings := map[string]any{"network": map[string]any{"allowedDomains": []any{"api.example.com"}}}
+	if _, err := inject(map[string]any{
+		"T": map[string]any{"from": "echo x", "hosts": []any{"api.example.com"}},
+	}, settings); err != nil {
+		t.Fatal(err)
+	}
+	// srt rejects a null excludeDomains.
+	b, _ := json.Marshal(settings["network"].(map[string]any)["tlsTerminate"])
+	if string(b) != `{"excludeDomains":[]}` {
+		t.Errorf("tlsTerminate %s", b)
 	}
 }
 
