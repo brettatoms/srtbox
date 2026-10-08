@@ -39,7 +39,7 @@ export os
 . "$here/lib.sh"
 
 if [ $# -eq 0 ]; then
-  set -- launch filesystem credentials broker forward network
+  set -- launch filesystem credentials broker forward network config
 fi
 for name in "$@"; do
   echo "== $name"

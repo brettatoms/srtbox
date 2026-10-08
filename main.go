@@ -22,6 +22,9 @@ const usage = `srtbox runs a command in an srt sandbox under a per-project polic
 
 Usage:
   srtbox run [-p <project>] [--ssh <host>] [--key <path>] [--] <command> [args...]
+  srtbox shell [-p <project>] [--ssh <host>] [--key <path>]
+                                    start $SHELL inside, its prompt marked
+  srtbox doctor [-p <project>]      check that the project's sessions can start
   srtbox list                       list configured projects
   srtbox show [<project>]           print the settings srt would receive
   srtbox why [-p <project>] <target>...  explain access to a path, host or $VAR
@@ -44,6 +47,7 @@ func main() {
 }
 
 func run(args []string) int {
+	launch.Version = buildVersion()
 	// Inside a session, srtbox is linked under each brokered program's name.
 	if name := filepath.Base(os.Args[0]); os.Getenv(broker.EnvSocket) != "" && name != selfName() {
 		return broker.ClientMain(name, args)
@@ -61,6 +65,10 @@ func run(args []string) int {
 		return 0
 	case "run":
 		return launch.Main(args[1:])
+	case "shell":
+		return launch.Shell(args[1:])
+	case "doctor":
+		return launch.Doctor(args[1:])
 	case "list":
 		return launch.List()
 	case "show":

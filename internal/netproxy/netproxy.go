@@ -111,9 +111,54 @@ func splice(a, b net.Conn) {
 	b.Close()
 }
 
-// ResolvePorts turns entries like "3020" or "@path/to/portfile" into port
-// numbers. A relative portfile is read from base. Entries that cannot be read
-// or parsed are skipped: a REPL that is not running has no port file.
+// maxRange bounds a _forward port range, so a typo such as "1-65535" cannot
+// open every port on the host's loopback.
+const maxRange = 1000
+
+func validPort(n int) bool { return n > 0 && n < 65536 }
+
+// portRange parses "lo-hi".
+func portRange(s string) (lo, hi int, ok bool) {
+	a, b, found := strings.Cut(s, "-")
+	if !found {
+		return 0, 0, false
+	}
+	lo, err1 := strconv.Atoi(a)
+	hi, err2 := strconv.Atoi(b)
+	return lo, hi, err1 == nil && err2 == nil
+}
+
+// CheckForward returns an error naming the first _forward entry that is not a
+// port, a range of at most maxRange ports, or an @portfile. A portfile's
+// contents are checked only when read, since it may not exist yet.
+func CheckForward(entries []string) error {
+	for _, e := range entries {
+		if strings.HasPrefix(e, "@") {
+			if e == "@" {
+				return fmt.Errorf("_forward: %q names no portfile", e)
+			}
+			continue
+		}
+		if lo, hi, ok := portRange(e); ok {
+			switch {
+			case !validPort(lo) || !validPort(hi) || lo > hi:
+				return fmt.Errorf("_forward: %q is not a range of ports, low to high", e)
+			case hi-lo+1 > maxRange:
+				return fmt.Errorf("_forward: %q spans more than %d ports", e, maxRange)
+			}
+			continue
+		}
+		if n, err := strconv.Atoi(e); err != nil || !validPort(n) {
+			return fmt.Errorf("_forward: %q is not a port, a range or an @portfile", e)
+		}
+	}
+	return nil
+}
+
+// ResolvePorts turns entries like "3020", "3020-3039" or "@path/to/portfile"
+// into port numbers. A relative portfile is read from base. Entries that
+// cannot be read or parsed are skipped: a REPL that is not running has no
+// port file, and CheckForward has already refused malformed entries.
 func ResolvePorts(entries []string, base string) []int {
 	var ports []int
 	for _, e := range entries {
@@ -128,8 +173,15 @@ func ResolvePorts(entries []string, base string) []int {
 				continue
 			}
 			s = strings.TrimSpace(string(b))
+		} else if lo, hi, ok := portRange(e); ok {
+			if validPort(lo) && validPort(hi) && lo <= hi && hi-lo < maxRange {
+				for n := lo; n <= hi; n++ {
+					ports = append(ports, n)
+				}
+			}
+			continue
 		}
-		if n, err := strconv.Atoi(s); err == nil && n > 0 && n < 65536 {
+		if n, err := strconv.Atoi(s); err == nil && validPort(n) {
 			ports = append(ports, n)
 		}
 	}

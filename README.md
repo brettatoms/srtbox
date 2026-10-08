@@ -12,8 +12,9 @@ cd ~/src/myproject && srtbox run claude
 
 ## Install
 
-srtbox needs srt on `PATH`. On Linux, srt also needs bubblewrap and socat; the
-nixpkgs `sandbox-runtime` package includes both.
+srtbox needs srt 0.0.76 or later on `PATH`; with an older srt a session never
+exits. On Linux, srt also needs bubblewrap and socat; the nixpkgs
+`sandbox-runtime` package includes both.
 
 ```
 npm install -g @anthropic-ai/sandbox-runtime    # or nixpkgs#sandbox-runtime
@@ -49,12 +50,13 @@ main.version=<tag>"` at the tag gives a byte-identical binary.
 
 2. In `myproject.json`, set `_root` to your project's directory, and use the
    same path in `allowRead` and `allowWrite`.
-3. Check that srtbox finds the project, and review the settings that srt
-   receives:
+3. Check that srtbox finds the project, review the settings that srt
+   receives, and check that a session can start:
 
    ```
    srtbox list
    srtbox show myproject
+   srtbox doctor -p myproject
    ```
 
 4. From inside the project, run a command in the sandbox:
@@ -71,6 +73,8 @@ main.version=<tag>"` at the tag gives a byte-identical binary.
 
 ```
 srtbox run [-p <project>] [--ssh <host>] [--key <path>] [--] <command> [args...]
+srtbox shell [-p <project>] [--ssh <host>] [--key <path>]
+srtbox doctor [-p <project>]      check that the project's sessions can start
 srtbox list                       list configured projects
 srtbox show [<project>]           print the settings srt would receive
 srtbox why [-p <project>] <target>...   explain access to a path, host, or environment variable
@@ -78,8 +82,21 @@ srtbox approve                    answer brokered commands waiting for approval
 srtbox version
 ```
 
-Without `-p`, `run` and `show` use the project whose `_root` contains the
-working directory, the deepest one if roots nest.
+Without `-p`, `run`, `shell`, `doctor` and `show` use the project whose
+`_root` contains the working directory, the deepest one if roots nest.
+
+`shell` starts your `$SHELL` in the sandbox with its prompt marked
+`[srtbox:<project>]`. The sandbox usually hides your home directory, and with
+it your rc file, so srtbox gives zsh and bash an rc file of its own, in the
+session's private directory, that loads yours when the sandbox can read it and
+then marks the prompt. Other shells get the mark through `PS1`.
+
+`doctor` loads the project's config, checks srt's version, the brokered
+programs and each `_inject` source (never printing a value), then starts a
+session that runs `true`. That last step is the one that shows srt can build
+the sandbox on this machine; when it fails on Linux, doctor also says whether
+AppArmor's restriction on user namespaces is the cause. It exits non-zero
+when any check fails.
 
 When no project's `_root` contains it, they warn and use the `default`
 project: `base.json`, with the working directory as `_root` and readable and
@@ -93,9 +110,10 @@ root, `run` and `show` then fail and ask for `-p`.
 ## Configuration
 
 Policy lives in `$XDG_CONFIG_HOME/srtbox`, by default `~/.config/srtbox`
-(`SRTBOX_CONFIG_DIR` overrides it). `base.json` applies to every project and
-`<project>.json` overlays it: objects merge key by key, arrays are combined, and
-other values from the project win. The result is srt's own
+(`SRTBOX_CONFIG_DIR` overrides it). `base.json` applies to every project, then
+the files the project's `_include` lists, then `<project>.json`: objects merge
+key by key, arrays are combined, and other values from the later file win. The
+result is srt's own
 [settings format](https://github.com/anthropics/sandbox-runtime#configuration),
 so everything srt supports can be set here.
 
@@ -122,12 +140,21 @@ Keys starting with `_` are read by srtbox and never passed to srt:
 | Key | Meaning |
 |---|---|
 | `_root` | The project tree. `run` picks the project from it when `-p` is omitted, nested repos are found under it, and srtbox warns when launched outside it. |
-| `_forward` | Host loopback ports to relay in: `"3000"`, or `"@path"` for a file holding a port number, relative to `_root`, such as `.nrepl-port`. |
+| `_forward` | Host loopback ports to relay in: `"3000"`, a range such as `"3020-3039"` (at most 1000 ports), or `"@path"` for a file holding a port number, relative to `_root`, such as `.nrepl-port`. srtbox refuses to launch with an entry that is none of these. |
+| `_include` | Files to merge between `base.json` and the project file, named relative to the config directory, such as `include/team.json`. Read only in project files, one level deep. A file that is missing or resolves outside the config directory stops the launch. |
+| `_requires` | The oldest srtbox version the file works with, such as `"0.3.0"`. An older srtbox refuses to launch. Development builds skip the check. |
 | `_broker` | Programs whose matching commands run on the host instead of in the sandbox. See [Broker](#broker). |
 | `_mkdir` | Directories to create before launch. srt can only grant write access to a path that exists. |
 | `_denyEnv` | Patterns for environment variable names (`*TOKEN*`), matched case-insensitively against the launch environment, to withhold from the sandbox. |
 | `_allowEnv` | Exact environment variable names to pass through even when a `_denyEnv` pattern matches. Not patterns, and case-sensitive. |
 | `_inject` | Environment variables whose values srtbox fetches on the host and gives to the sandbox as placeholders. See [Credentials](#credentials). |
+
+An included file suits policy that someone else maintains, such as a team's,
+written by a setup tool while your own additions stay in the project file. Keep
+included files in a subdirectory such as `include/`: every `*.json` at the top
+of the config directory is listed as a project. srtbox before 0.3.0 ignores
+`_include` and `_requires`, so keep a rule that protects you, such as
+`denyRead: ["~"]`, in the project file as well.
 
 [examples/](examples) has a starting `base.json` and project file. The
 `base.json` follows the recipe in [Claude Code's own login](#credentials), so

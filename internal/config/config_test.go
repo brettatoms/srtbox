@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -193,14 +194,14 @@ func TestDefaultLayersGrantTheWorkingDirectory(t *testing.T) {
 	if !Generated(DefaultProject) {
 		t.Error("Generated is false without a file")
 	}
-	base, overlay, err := Layers(DefaultProject)
+	layers, err := Layers(DefaultProject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if base != nil {
-		t.Errorf("base = %v; want nil without base.json", base)
+	if len(layers) != 1 {
+		t.Fatalf("layers = %v; want only the generated overlay without base.json", layers)
 	}
-	m, settings := Split(overlay)
+	m, settings := Split(layers[0].Doc)
 	if m.Root != dir {
 		t.Errorf("_root = %q; want %q", m.Root, dir)
 	}
@@ -224,7 +225,7 @@ func TestDefaultRefusesDirsHoldingHomeOrConfig(t *testing.T) {
 	brokers := filepath.Join(home, ".config", "srtbox", "brokers")
 	for _, dir := range []string{tmp, home, filepath.Join(home, ".config"), dotfiles, brokers} {
 		t.Chdir(dir)
-		if _, _, err := Layers(DefaultProject); err == nil {
+		if _, err := Layers(DefaultProject); err == nil {
 			t.Errorf("no error with the working directory at %s", dir)
 		}
 	}
@@ -267,5 +268,94 @@ func TestFollowLinksAddsTargetsButNotPlantableOnes(t *testing.T) {
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "planted") {
 		t.Errorf("warnings %v", warnings)
+	}
+}
+
+// includeConf writes a config dir with base.json, include/team.json and p.json.
+func includeConf(t *testing.T, project string) string {
+	t.Helper()
+	conf, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Setenv("SRTBOX_CONFIG_DIR", conf)
+	os.MkdirAll(filepath.Join(conf, "include"), 0o700)
+	os.WriteFile(filepath.Join(conf, "base.json"), []byte(`{"x":"base","a":["base"]}`), 0o600)
+	os.WriteFile(filepath.Join(conf, "include", "team.json"), []byte(`{"x":"team","y":"team","a":["team"]}`), 0o600)
+	os.WriteFile(filepath.Join(conf, "p.json"), []byte(project), 0o600)
+	return conf
+}
+
+func TestIncludesMergeBetweenBaseAndProject(t *testing.T) {
+	includeConf(t, `{"_include":["include/team.json"],"y":"mine","a":["mine"]}`)
+
+	layers, err := Layers("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, l := range layers {
+		names = append(names, l.Name)
+	}
+	if want := []string{"base.json", "include/team.json", "p.json"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("layers %v; want %v", names, want)
+	}
+	doc, err := Load("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc["x"] != "team" || doc["y"] != "mine" || !reflect.DeepEqual(doc["a"], []any{"base", "team", "mine"}) {
+		t.Errorf("merged %v", doc)
+	}
+	if names, _ := Projects(); !reflect.DeepEqual(names, []string{"p"}) {
+		t.Errorf("Projects() = %v; included files are not projects", names)
+	}
+}
+
+func TestIncludeRefusals(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "evil.json")
+	os.WriteFile(outside, []byte(`{}`), 0o600)
+	for _, c := range []struct{ name, project, want string }{
+		{"missing", `{"_include":["include/missing.json"]}`, "include/missing.json"},
+		{"absolute", `{"_include":["` + outside + `"]}`, "must be relative"},
+		{"dot-dot", `{"_include":["../evil.json"]}`, "outside"},
+		{"link out", `{"_include":["include/link.json"]}`, "outside"},
+		{"nested", `{"_include":["include/nested.json"]}`, "cannot include"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			conf := includeConf(t, c.project)
+			os.WriteFile(filepath.Join(filepath.Dir(conf), "evil.json"), []byte(`{}`), 0o600)
+			os.Symlink(outside, filepath.Join(conf, "include", "link.json"))
+			os.WriteFile(filepath.Join(conf, "include", "nested.json"), []byte(`{"_include":["include/team.json"]}`), 0o600)
+			if _, err := Load("p"); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("err %v; want one mentioning %q", err, c.want)
+			}
+		})
+	}
+}
+
+func TestBaseCannotInclude(t *testing.T) {
+	conf := includeConf(t, `{}`)
+	os.WriteFile(filepath.Join(conf, "base.json"), []byte(`{"_include":["include/team.json"]}`), 0o600)
+	if _, err := Load("p"); err == nil || !strings.Contains(err.Error(), "base.json") {
+		t.Errorf("err %v; want base.json's _include refused", err)
+	}
+}
+
+func TestCheckRequires(t *testing.T) {
+	layers := []Layer{
+		{"base.json", map[string]any{"_requires": "0.2.0"}},
+		{"include/team.json", map[string]any{"_requires": "0.3.0"}},
+		{"p.json", map[string]any{}},
+	}
+	for have, want := range map[string]string{
+		"v0.3.0": "", "0.3.1": "", "v1.0.0": "", "dev": "", "(devel)": "",
+		"v0.2.9": "include/team.json needs srtbox 0.3.0 or later; this is v0.2.9",
+	} {
+		err := CheckRequires(layers, have)
+		if got := fmt.Sprint(err); (want == "" && err != nil) || (want != "" && got != want) {
+			t.Errorf("have %s: err %v; want %q", have, err, want)
+		}
+	}
+	bad := []Layer{{"p.json", map[string]any{"_requires": "soon"}}}
+	if err := CheckRequires(bad, "v0.3.0"); err == nil || !strings.Contains(err.Error(), "soon") {
+		t.Errorf("err %v; want the bad version named", err)
 	}
 }

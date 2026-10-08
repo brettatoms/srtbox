@@ -43,9 +43,9 @@ var sections = [][2]string{
 }
 
 // New builds the policy for project from its final settings. Rules found in
-// neither config file were added by srtbox.
+// no config file were added by srtbox.
 func New(project string, meta config.Meta, settings map[string]any) (*Policy, error) {
-	base, overlay, err := config.Layers(project)
+	layers, err := config.Layers(project)
 	if err != nil {
 		return nil, err
 	}
@@ -54,28 +54,21 @@ func New(project string, meta config.Meta, settings map[string]any) (*Policy, er
 		Forward: meta.Forward, DenyEnv: meta.DenyEnv, AllowEnv: meta.AllowEnv,
 		Sources: map[string]map[string]string{},
 	}
-	overlayName := project + ".json"
 	if config.Generated(project) {
-		overlayName = SourceDefault
+		layers[len(layers)-1].Name = SourceDefault
 	}
-	layers := []struct {
-		name string
-		doc  map[string]any
-	}{{"base.json", base}, {overlayName, overlay}}
 	trace := func(key string, values func(map[string]any) []string) {
 		src := map[string]string{}
 		for _, v := range values(settings) {
 			src[v] = SourceSrtbox
 		}
-		// The project file is checked last so it wins when both list a rule.
+		// Layers are checked in merge order, so the project file wins when
+		// several list a rule.
 		for _, l := range layers {
-			if l.doc == nil {
-				continue
-			}
-			doc := config.Expand(l.doc, os.LookupEnv).(map[string]any)
+			doc := config.Expand(l.Doc, os.LookupEnv).(map[string]any)
 			for _, v := range values(doc) {
 				if _, ok := src[v]; ok {
-					src[v] = l.name
+					src[v] = l.Name
 				}
 			}
 		}

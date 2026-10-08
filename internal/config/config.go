@@ -1,5 +1,5 @@
-// Package config loads a project's sandbox policy: base.json merged with
-// <project>.json from the config directory. Keys starting with "_" are read by
+// Package config loads a project's sandbox policy: base.json, the files the
+// project includes, and <project>.json, from the config directory. Keys starting with "_" are read by
 // srtbox itself and stripped before the settings reach srt.
 package config
 
@@ -158,34 +158,139 @@ type Meta struct {
 	Inject   map[string]any // variables fetched on the host and masked inside: name → {from, hosts}
 }
 
-// Load merges base.json (optional) with <project>.json.
+// Layer is one config file's contents, named as srtbox reports its rules.
+type Layer struct {
+	Name string
+	Doc  map[string]any
+}
+
+// Load merges a project's layers in order.
 func Load(project string) (map[string]any, error) {
-	base, overlay, err := Layers(project)
+	layers, err := Layers(project)
 	if err != nil {
 		return nil, err
 	}
-	return Merge(base, overlay).(map[string]any), nil
+	return MergeLayers(layers), nil
 }
 
-// Layers returns base.json (nil when absent) and <project>.json, unmerged.
-func Layers(project string) (base, overlay map[string]any, err error) {
+// MergeLayers merges layers in order.
+func MergeLayers(layers []Layer) map[string]any {
+	var doc any = map[string]any{}
+	for _, l := range layers {
+		doc = Merge(doc, l.Doc)
+	}
+	return doc.(map[string]any)
+}
+
+var semver = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)`)
+
+func parseVersion(s string) ([3]int, bool) {
+	m := semver.FindStringSubmatch(s)
+	if m == nil {
+		return [3]int{}, false
+	}
+	var v [3]int
+	for i := range v {
+		v[i], _ = strconv.Atoi(m[i+1])
+	}
+	return v, true
+}
+
+// VersionAtLeast reports whether have is version want or later.
+func VersionAtLeast(have, want string) bool {
+	h, ok := parseVersion(have)
+	w, ok2 := parseVersion(want)
+	return ok && ok2 && slices.Compare(h[:], w[:]) >= 0
+}
+
+// CheckRequires refuses a running srtbox older than any layer's _requires.
+// A build without a version, such as "dev", passes.
+func CheckRequires(layers []Layer, have string) error {
+	h, ok := parseVersion(have)
+	if !ok {
+		return nil
+	}
+	for _, l := range layers {
+		req := str(l.Doc["_requires"])
+		if req == "" {
+			continue
+		}
+		r, ok := parseVersion(req)
+		if !ok {
+			return fmt.Errorf("%s: _requires %q is not a version such as 0.3.0", l.Name, req)
+		}
+		if slices.Compare(h[:], r[:]) < 0 {
+			return fmt.Errorf("%s needs srtbox %s or later; this is %s", l.Name, req, have)
+		}
+	}
+	return nil
+}
+
+// Layers returns a project's config files in merge order: base.json when
+// present, the files the project's _include lists, then the project file.
+func Layers(project string) ([]Layer, error) {
+	name := project + ".json"
+	var overlay map[string]any
+	var err error
 	if Generated(project) {
 		overlay, err = defaultOverlay()
 	} else {
-		overlay, err = readJSON(filepath.Join(Dir(), project+".json"))
+		overlay, err = readJSON(filepath.Join(Dir(), name))
 	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			names, _ := Projects()
-			return nil, nil, fmt.Errorf("no such project: %s (have: %s)", project, strings.Join(names, " "))
+			return nil, fmt.Errorf("no such project: %s (have: %s)", project, strings.Join(names, " "))
 		}
-		return nil, nil, err
+		return nil, err
 	}
-	base, err = readJSON(filepath.Join(Dir(), "base.json"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, nil, err
+	var layers []Layer
+	base, err := readJSON(filepath.Join(Dir(), "base.json"))
+	switch {
+	case err == nil:
+		if _, ok := base["_include"]; ok {
+			return nil, errors.New("base.json: _include is read only in project files")
+		}
+		layers = append(layers, Layer{"base.json", base})
+	case !errors.Is(err, os.ErrNotExist):
+		return nil, err
 	}
-	return base, overlay, nil
+	for _, inc := range strs(overlay["_include"]) {
+		doc, err := readInclude(inc)
+		if err != nil {
+			return nil, fmt.Errorf("%s: _include: %w", name, err)
+		}
+		layers = append(layers, Layer{inc, doc})
+	}
+	return append(layers, Layer{name, overlay}), nil
+}
+
+// readInclude reads a file that a project includes, named relative to the
+// config directory. It must resolve inside that directory: a policy file
+// anywhere else could be one that a sandbox can write.
+func readInclude(rel string) (map[string]any, error) {
+	if filepath.IsAbs(rel) {
+		return nil, fmt.Errorf("%s: must be relative to %s", rel, Dir())
+	}
+	dir, err := filepath.EvalSymlinks(Dir())
+	if err != nil {
+		return nil, err
+	}
+	path, err := filepath.EvalSymlinks(filepath.Join(dir, rel))
+	if err != nil {
+		return nil, err
+	}
+	if !Within(path, dir) {
+		return nil, fmt.Errorf("%s: resolves outside %s", rel, Dir())
+	}
+	doc, err := readJSON(path)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := doc["_include"]; ok {
+		return nil, fmt.Errorf("%s: an included file cannot include others", rel)
+	}
+	return doc, nil
 }
 
 func readJSON(path string) (map[string]any, error) {

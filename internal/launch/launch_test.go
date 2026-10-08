@@ -172,3 +172,24 @@ func TestAllowTerminalOnMacOSUnlessSet(t *testing.T) {
 		t.Error("set allowPty on Linux")
 	}
 }
+
+func TestBuildRefusesAMalformedForward(t *testing.T) {
+	conf := t.TempDir()
+	t.Setenv("SRTBOX_CONFIG_DIR", conf)
+	os.WriteFile(filepath.Join(conf, "p.json"), []byte(`{"_forward":["3020","3039-3020"]}`), 0o600)
+	if _, _, err := Build("p"); err == nil || !strings.Contains(err.Error(), "3039-3020") {
+		t.Errorf("err %v; want the bad range named", err)
+	}
+}
+
+func TestBuildRefusesAnOlderSrtbox(t *testing.T) {
+	conf := t.TempDir()
+	t.Setenv("SRTBOX_CONFIG_DIR", conf)
+	os.WriteFile(filepath.Join(conf, "p.json"), []byte(`{"_requires":"9.0.0"}`), 0o600)
+	old := Version
+	Version = "v0.3.0"
+	t.Cleanup(func() { Version = old })
+	if _, _, err := Build("p"); err == nil || !strings.Contains(err.Error(), "9.0.0") {
+		t.Errorf("err %v; want the requirement named", err)
+	}
+}

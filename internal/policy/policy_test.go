@@ -58,3 +58,22 @@ func TestSourcesNameTheDefaultProject(t *testing.T) {
 		t.Errorf("got %q, want %q", got, SourceDefault)
 	}
 }
+
+func TestSourcesNameIncludedFiles(t *testing.T) {
+	conf := t.TempDir()
+	t.Setenv("SRTBOX_CONFIG_DIR", conf)
+	os.MkdirAll(filepath.Join(conf, "include"), 0o700)
+	os.WriteFile(filepath.Join(conf, "include", "team.json"), []byte(`{"network":{"allowedDomains":["team.example","both.example"]}}`), 0o600)
+	os.WriteFile(filepath.Join(conf, "p.json"), []byte(`{"_include":["include/team.json"],"network":{"allowedDomains":["both.example"]}}`), 0o600)
+	settings := map[string]any{"network": map[string]any{"allowedDomains": []any{"team.example", "both.example"}}}
+
+	p, err := New("p", config.Meta{}, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for value, want := range map[string]string{"team.example": "include/team.json", "both.example": "p.json"} {
+		if got := p.Source("network.allowedDomains", value); got != want {
+			t.Errorf("%s: got %q, want %q", value, got, want)
+		}
+	}
+}

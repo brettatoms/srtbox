@@ -195,3 +195,21 @@ func TestRelaysFollowServingAndPortfileChanges(t *testing.T) {
 		t.Errorf("still relaying %d after the portfile moved", a)
 	}
 }
+
+func TestResolvePortsExpandsRanges(t *testing.T) {
+	got := ResolvePorts([]string{"3020-3022", "7888", "5-3"}, t.TempDir())
+	if !reflect.DeepEqual(got, []int{3020, 3021, 3022, 7888}) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestCheckForward(t *testing.T) {
+	if err := CheckForward([]string{"3020", "3020-3039", "@.nrepl-port", "@/abs/port"}); err != nil {
+		t.Errorf("valid entries refused: %v", err)
+	}
+	for _, bad := range []string{"nope", "0", "70000", "3039-3020", "1-65535", "3020-x", "@"} {
+		if err := CheckForward([]string{bad}); err == nil || !strings.Contains(err.Error(), bad) {
+			t.Errorf("%q: err %v; want one naming the entry", bad, err)
+		}
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/brettatoms/srtbox/internal/config"
+	"github.com/brettatoms/srtbox/internal/netproxy"
 	"github.com/brettatoms/srtbox/internal/policy"
 	"github.com/brettatoms/srtbox/internal/sandbox"
 )
@@ -23,15 +24,24 @@ import (
 // reaches a worktree inside a repo inside a workspace: ws/repo/worktrees/wt.
 const repoSearchDepth = 5
 
+// Version is the running srtbox's version, checked against _requires.
+var Version = "dev"
+
 // Build returns the settings srt will receive for project, and the meta keys
 // srtbox acts on. It does not start anything.
 func Build(project string) (config.Meta, map[string]any, error) {
-	doc, err := config.Load(project)
+	layers, err := config.Layers(project)
 	if err != nil {
 		return config.Meta{}, nil, err
 	}
-	doc = config.Expand(doc, os.LookupEnv).(map[string]any)
+	if err := config.CheckRequires(layers, Version); err != nil {
+		return config.Meta{}, nil, err
+	}
+	doc := config.Expand(config.MergeLayers(layers), os.LookupEnv).(map[string]any)
 	meta, settings := config.Split(doc)
+	if err := netproxy.CheckForward(meta.Forward); err != nil {
+		return config.Meta{}, nil, err
+	}
 
 	if meta.Root != "" {
 		if paths := config.ProtectRepos(meta.Root, repoSearchDepth, nil); len(paths) > 0 {
@@ -81,6 +91,11 @@ func Main(args []string) int {
 		fmt.Fprintln(os.Stderr, "srtbox:", err)
 		return 2
 	}
+	return session(opts, cmdArgs)
+}
+
+// session runs cmdArgs in the sandbox, or with none, the user's shell.
+func session(opts options, cmdArgs []string) int {
 	project, err := resolveProject(opts.project)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "srtbox:", err)
@@ -157,6 +172,20 @@ func Main(args []string) int {
 	}
 	cleanup = append(cleanup, func() { os.RemoveAll(tmp) })
 	env = append(env, "CLAUDE_CODE_TMPDIR="+tmp)
+
+	if cmdArgs == nil {
+		shell := os.Getenv("SHELL")
+		if shell == "" {
+			shell = "/bin/sh"
+		}
+		argv, senv, err := shellCommand(shell, project, filepath.Join(sess, "shell"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "srtbox:", err)
+			return 1
+		}
+		cmdArgs = argv
+		env = append(env, senv...)
+	}
 
 	if len(meta.Broker) > 0 {
 		benv, stop, err := startBroker(project, meta, settings, sess)
@@ -312,7 +341,17 @@ type options struct {
 	ssh     []sshTarget
 }
 
+// parseArgs reads run's options and requires a command after them.
 func parseArgs(args []string) (options, []string, error) {
+	o, rest, err := parseOptions(args)
+	if err == nil && len(rest) == 0 {
+		err = errors.New("no command given")
+	}
+	return o, rest, err
+}
+
+// parseOptions reads -p, --ssh and --key, and returns what follows them.
+func parseOptions(args []string) (options, []string, error) {
 	var o options
 	rest := args
 	for len(rest) > 0 {
@@ -342,9 +381,6 @@ func parseArgs(args []string) (options, []string, error) {
 			rest = rest[1:]
 		}
 		break
-	}
-	if len(rest) == 0 {
-		return o, nil, errors.New("no command given")
 	}
 	return o, rest, nil
 }
