@@ -494,7 +494,13 @@ configure the tool to use `TMPDIR` instead.
 ```
 devenv shell        # Go and srt
 go test ./...
+tests/e2e/run.sh    # srtbox under the real sandbox, from outside a session
 ```
+
+`tests/e2e/run.sh` builds srtbox, runs it with throwaway configs, and checks
+what sandboxed commands see. Name files in `tests/e2e` to run only those, such
+as `tests/e2e/run.sh broker`. The checks that reach hosts on the internet run
+only with `SRTBOX_E2E_NETWORK=1`.
 
 To release, push a `vX.Y.Z` tag. The release workflow builds each platform,
 writes `SHA256SUMS`, attests provenance and publishes the GitHub release.
