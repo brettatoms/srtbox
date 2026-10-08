@@ -57,7 +57,8 @@ Policy lives in `$XDG_CONFIG_HOME/srtbox`, by default `~/.config/srtbox`
 `<project>.json` overlays it: objects merge key by key, arrays are combined, and
 other values from the project win. The result is srt's own
 [settings format](https://github.com/anthropics/sandbox-runtime#configuration),
-so everything srt supports can be set here.
+so everything srt supports can be set here. The files can hold `//` and
+`/* */` comments and trailing commas.
 
 Reads are allowed everywhere unless denied: `denyRead` is a blocklist, and
 `allowRead` re-opens paths inside it. With `denyRead: ["~"]` the sandbox still
