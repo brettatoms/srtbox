@@ -310,8 +310,11 @@ can reach. `_inject` keeps the real value on the host:
 At launch srtbox runs `from` on the host (a shell string or an argv array) and
 hands the value to srt as a masked credential. The sandbox sees a per-session
 placeholder; srt's proxy replaces it with the real value only in requests to
-`hosts`, which must be in `allowedDomains`. A command that fails leaves the
-environment variable out, with a warning, and the launch continues.
+`hosts`, which must be in `allowedDomains`. A command that fails or prints
+nothing leaves the environment variable out, with a warning, and the launch
+continues. Add `"optional": true` to an entry for a tool not everyone uses:
+then a missing value is left out without a warning, and without the
+command's own error output. `srtbox doctor` still lists it, as optional.
 
 To see inside those requests srt terminates their TLS with a per-session CA,
 and points the sandbox's trust environment variables (`SSL_CERT_FILE`,

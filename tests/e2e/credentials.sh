@@ -9,7 +9,8 @@ project creds <<EOF
    {"path": "$T/creds/masked.txt", "mode": "mask", "injectHosts": ["httpbin.org"]}]},
  "_inject": {
    "E2E_INJECTED": {"from": "printf e2e-injected-value", "hosts": ["httpbin.org"]},
-   "E2E_BROKEN": {"from": "false", "hosts": ["httpbin.org"]}},
+   "E2E_BROKEN": {"from": "false", "hosts": ["httpbin.org"]},
+   "E2E_OPTIONAL": {"from": "echo e2e-optional-noise >&2; false", "hosts": ["httpbin.org"], "optional": true}},
  "_denyEnv": ["E2E_*_TOKEN"],
  "_allowEnv": ["E2E_KEEP_TOKEN"]}
 EOF
@@ -38,6 +39,10 @@ check "_inject gives the sandbox a placeholder" placeholder \
 check "a failing _inject command warns" "warning: _inject.E2E_BROKEN" sbx creds true
 check "a failing _inject command leaves the variable out" broken=unset \
   sbx creds sh -c 'echo "broken=${E2E_BROKEN-unset}"'
+out=$(sbx creds sh -c 'echo "optional=${E2E_OPTIONAL-unset}"' 2>&1)
+check "an optional failing _inject is left out" optional=unset echo "$out"
+check "an optional failing _inject is silent" quiet \
+  sh -c 'case "$1" in *E2E_OPTIONAL*|*e2e-optional-noise*) echo noisy;; *) echo quiet;; esac' _ "$out"
 
 check "_denyEnv withholds matching variables" drop=unset \
   sbx creds sh -c 'echo "drop=${E2E_DROP_TOKEN-unset}"'

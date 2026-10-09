@@ -23,11 +23,16 @@ const injectTimeout = 15 * time.Second
 
 var envVarName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// warnf reports a problem that does not stop the launch.
+var warnf = func(format string, args ...any) { fmt.Fprintf(os.Stderr, format, args...) }
+
 // injection is one _inject entry: a host command that prints the value, and
-// the hosts it may be sent to.
+// the hosts it may be sent to. An optional entry whose command fails or prints
+// nothing is left out without a warning, its command's own errors included.
 type injection struct {
-	From  any      `json:"from"`
-	Hosts []string `json:"hosts"`
+	From     any      `json:"from"`
+	Hosts    []string `json:"hosts"`
+	Optional bool     `json:"optional"`
 }
 
 // inject fetches each _inject value on the host and masks it inside: the
@@ -65,9 +70,11 @@ func inject(raw map[string]any, settings map[string]any) ([]string, error) {
 				return nil, fmt.Errorf("_inject.%s: %s is not in allowedDomains", name, h)
 			}
 		}
-		val, err := fetch(argv)
+		val, err := fetch(argv, in.Optional)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "srtbox: warning: _inject.%s: %v; the sandbox will not have it\n", name, err)
+			if !in.Optional {
+				warnf("srtbox: warning: _inject.%s: %v; the sandbox will not have it\n", name, err)
+			}
 			continue
 		}
 		env = append(env, name+"="+val)
@@ -96,12 +103,17 @@ func inject(raw map[string]any, settings map[string]any) ([]string, error) {
 	return env, nil
 }
 
-func fetch(argv []string) (string, error) {
+// fetch runs an _inject command and returns what it printed. A quiet fetch
+// discards the command's stderr.
+func fetch(argv []string, quiet bool) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), injectTimeout)
 	defer cancel()
 	c := exec.CommandContext(ctx, config.Home(argv[0]), argv[1:]...)
 	var out bytes.Buffer
-	c.Stdout, c.Stderr = &out, os.Stderr
+	c.Stdout = &out
+	if !quiet {
+		c.Stderr = os.Stderr
+	}
 	if err := c.Run(); err != nil {
 		return "", fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
 	}

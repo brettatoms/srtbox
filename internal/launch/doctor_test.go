@@ -56,3 +56,12 @@ func TestApparmorHint(t *testing.T) {
 		t.Error("a hint with the restriction off")
 	}
 }
+
+func TestOptionalInjectFindingIsASkip(t *testing.T) {
+	fs := injectFindings(map[string]any{
+		"OPTIONAL": map[string]any{"from": "true", "hosts": []any{"a.example"}, "optional": true},
+	})
+	if len(fs) != 1 || fs[0].status != statusSkip || !strings.Contains(fs[0].msg, "optional") {
+		t.Errorf("findings %+v; want a skip that says optional", fs)
+	}
+}

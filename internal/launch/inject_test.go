@@ -2,6 +2,7 @@ package launch
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -108,5 +109,27 @@ func TestInjectRefusesHostsOutsideTheAllowlist(t *testing.T) {
 	}, settings)
 	if err == nil || !strings.Contains(err.Error(), "evil.example") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestOptionalInjectIsSkippedQuietly(t *testing.T) {
+	var warnings []string
+	old := warnf
+	warnf = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
+	t.Cleanup(func() { warnf = old })
+	settings := map[string]any{"network": map[string]any{"allowedDomains": []any{"github.com"}}}
+	env, err := inject(map[string]any{
+		"OPTIONAL": map[string]any{"from": "echo noise >&2; false", "hosts": []any{"github.com"}, "optional": true},
+		"EMPTY":    map[string]any{"from": "true", "hosts": []any{"github.com"}, "optional": true},
+		"REQUIRED": map[string]any{"from": "false", "hosts": []any{"github.com"}},
+	}, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(env) != 0 {
+		t.Errorf("env %v; want nothing injected", env)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "_inject.REQUIRED") {
+		t.Errorf("warnings %q; want one, for REQUIRED", warnings)
 	}
 }

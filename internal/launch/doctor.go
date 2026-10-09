@@ -31,6 +31,7 @@ const (
 	statusOK   = "ok"
 	statusWarn = "warn"
 	statusFail = "fail"
+	statusSkip = "skip"
 )
 
 type finding struct{ status, label, msg string }
@@ -89,7 +90,7 @@ func Doctor(args []string) int {
 }
 
 func report(fs []finding) {
-	glyph := map[string]string{statusOK: "✓", statusWarn: "⚠", statusFail: "✗"}
+	glyph := map[string]string{statusOK: "✓", statusWarn: "⚠", statusFail: "✗", statusSkip: "–"}
 	for _, f := range fs {
 		line := "  " + glyph[f.status] + " " + f.label
 		if f.msg != "" {
@@ -166,8 +167,13 @@ func injectFindings(raw map[string]any) []finding {
 			fs = append(fs, finding{statusFail, "inject " + n, "no from command"})
 			continue
 		}
-		if _, err := fetch(argv); err != nil {
-			fs = append(fs, finding{statusWarn, "inject " + n, err.Error() + "; sessions go without it"})
+		optional, _ := spec["optional"].(bool)
+		if _, err := fetch(argv, optional); err != nil {
+			if optional {
+				fs = append(fs, finding{statusSkip, "inject " + n, "not set; optional"})
+			} else {
+				fs = append(fs, finding{statusWarn, "inject " + n, err.Error() + "; sessions go without it"})
+			}
 			continue
 		}
 		fs = append(fs, finding{statusOK, "inject " + n, ""})
