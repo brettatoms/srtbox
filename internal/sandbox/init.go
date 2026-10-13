@@ -21,6 +21,7 @@ import (
 //   - relays terminal resizes, on Linux, where srt's bwrap --new-session means
 //     the kernel never delivers SIGWINCH inside
 //   - restores GIT_SSH_COMMAND for --ssh, which srt overwrites with its own
+//   - runs the _init hooks and sets the variables they print
 //   - forwards termination signals and reports a signal death as 128+N
 //
 // It stays the command's parent even when nothing else needs it, because srt
@@ -50,6 +51,9 @@ func Init(args []string) int {
 		}
 		go r.Follow(netproxy.RelayInterval)
 	}
+	var hooks []Hook
+	json.Unmarshal([]byte(os.Getenv(HooksEnv)), &hooks)
+	runHooks(hooks, os.Stderr)
 	tty := resizeTTY()
 
 	cmd := exec.Command(args[0], args[1:]...)

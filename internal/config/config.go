@@ -156,6 +156,8 @@ type Meta struct {
 	DenyEnv  []string       // variable-name patterns to withhold from the sandbox
 	AllowEnv []string       // exact variable names exempt from DenyEnv
 	Inject   map[string]any // variables fetched on the host and masked inside: name → {from, hosts}
+	Env      map[string]any // variables to set inside: name → value
+	Init     map[string]any // commands run inside before the user's: name → command or {command, timeout}
 }
 
 // Layer is one config file's contents, named as srtbox reports its rules.
@@ -404,6 +406,8 @@ func Split(doc map[string]any) (Meta, map[string]any) {
 		DenyEnv:  strs(doc["_denyEnv"]),
 		AllowEnv: strs(doc["_allowEnv"]),
 		Inject:   obj(doc["_inject"]),
+		Env:      obj(doc["_env"]),
+		Init:     obj(doc["_init"]),
 	}
 	for _, d := range strs(doc["_mkdir"]) {
 		m.Mkdir = append(m.Mkdir, Home(d))

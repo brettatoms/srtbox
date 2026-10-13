@@ -116,10 +116,22 @@ func session(opts options, cmdArgs []string) int {
 		os.MkdirAll(d, 0o700)
 	}
 
-	env := append(os.Environ(),
+	// _env comes before srtbox's own variables, so it cannot replace them.
+	eenv, err := setEnv(meta)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "srtbox:", err)
+		return 1
+	}
+	hooks, err := initHooks(meta.Init)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "srtbox:", err)
+		return 1
+	}
+	env := append(append(os.Environ(), eenv...),
 		"SRTBOX_PROJECT="+project,
 		"SRTBOX_ROOT="+meta.Root,
 		"SRTBOX_FORWARD="+jsonString(meta.Forward),
+		sandbox.HooksEnv+"="+jsonString(hooks),
 	)
 
 	var cleanup []func()

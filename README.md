@@ -148,6 +148,8 @@ Keys starting with `_` are read by srtbox and never passed to srt:
 | `_denyEnv` | Patterns for environment variable names (`*TOKEN*`), matched case-insensitively against the launch environment, to withhold from the sandbox. |
 | `_allowEnv` | Exact environment variable names to pass through even when a `_denyEnv` pattern matches. Not patterns, and case-sensitive. |
 | `_inject` | Environment variables whose values srtbox fetches on the host and gives to the sandbox as placeholders. See [Credentials](#credentials). |
+| `_env` | Environment variables to set inside, as an object of names and string values, such as `{"PAGER": "less"}`. A leading `~` is expanded. A name that `_denyEnv` withholds stops the launch: pass a credential with `_inject`. srtbox's own `SRTBOX_*` variables take precedence. |
+| `_init` | Commands to run inside the sandbox before the command, which can set its environment. See [Hooks](#hooks). |
 
 An included file suits policy that someone else maintains, such as a team's,
 written by a setup tool while your own additions stay in the project file. Keep
@@ -245,6 +247,7 @@ The command runs under `srtbox init`, which:
 - relays terminal resizes. srt starts the sandbox in a new session on Linux, so
   the kernel never delivers `SIGWINCH` inside and full-screen programs keep
   drawing at their starting size.
+- runs the `_init` hooks. See [Hooks](#hooks).
 - passes termination signals on and reports a signal death as `128+N`.
 
 These environment variables are set inside a session, for scripts that need
@@ -262,6 +265,73 @@ the host's loopback, so leave bare `127.0.0.1` and `localhost` out of
 `allowedDomains`: either would open every host port, databases and daemons
 included. When an `@file` port changes, srtbox sends srt the new allowlist over
 its control channel (`--control-fd`) and drops the old port.
+
+### Hooks
+
+`_init` names commands that `srtbox init` runs inside the sandbox, after the
+relays start and before the command, under the same policy as the command.
+Each `KEY=value` line a hook prints on stdout is set in the command's
+environment, and in the environment of the hooks after it. Other output on
+stdout is ignored, and stderr reaches the terminal.
+
+```json
+"_init": {
+  "maven-proxy": "sh /opt/srt-hooks/maven-proxy.sh",
+  "slow-one": {"command": ["./warm-cache"], "timeout": 60}
+}
+```
+
+An entry is a command, as a shell string or an argv array, or an object with
+`command` and `timeout`. A script it runs has to be readable inside the
+sandbox. Hooks run in name order. Each has 15 seconds unless
+its `timeout` says otherwise, in seconds, and `0` means no limit. A hook that
+fails or runs out of time is killed with everything it started, and its output
+is discarded. srtbox warns, and the command still runs.
+
+`${VAR}` in a hook's command is replaced on the host when srtbox reads the
+config, as everywhere else in it. Write `$VAR`, without braces, for the value
+inside the sandbox, such as its `TMPDIR`.
+
+### Tools that ignore HTTP_PROXY
+
+The sandbox reaches the network only through srt's proxy, which requires the
+credentials in `HTTP_PROXY`. A tool that reads its proxy from its own config
+instead connects directly and fails with a DNS error, because the sandbox has
+no resolver of its own. srt also sets the proxy's parts separately, as
+`CLOUDSDK_PROXY_ADDRESS`, `CLOUDSDK_PROXY_PORT`, `CLOUDSDK_PROXY_USERNAME` and
+`CLOUDSDK_PROXY_PASSWORD`. A hook can write the tool a config from them and
+print the variable that selects it, so the same tool on the host is unaffected.
+
+Maven's resolver, which the Clojure CLI also uses, reads its proxy only from
+Maven settings. It ignores the JVM proxy properties that srt's Java agent sets,
+and sends proxy credentials only from settings. It reads global settings from
+`$MAVEN_HOME/conf/settings.xml`. Maven reads `<port>` as a number before it
+substitutes variables, and srt's port differs between platforms, so the hook
+writes the port in:
+
+```sh
+#!/bin/sh
+d="$TMPDIR/maven"
+mkdir -p "$d/conf"
+proxy() {
+  printf '    <proxy><id>srt-%s</id><protocol>%s</protocol>\n' "$1" "$1"
+  printf '      <host>${env.CLOUDSDK_PROXY_ADDRESS}</host><port>%s</port>\n' "$CLOUDSDK_PROXY_PORT"
+  printf '      <username>${env.CLOUDSDK_PROXY_USERNAME}</username>\n'
+  printf '      <password>${env.CLOUDSDK_PROXY_PASSWORD}</password></proxy>\n'
+}
+{
+  echo '<settings>'
+  echo '  <proxies>'
+  proxy https
+  proxy http
+  echo '  </proxies>'
+  echo '</settings>'
+} > "$d/conf/settings.xml"
+echo "MAVEN_HOME=$d"
+```
+
+The credentials stay in the environment: the file holds only references to
+them.
 
 ## Why is it blocked?
 
