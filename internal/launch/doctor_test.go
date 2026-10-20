@@ -65,3 +65,15 @@ func TestOptionalInjectFindingIsASkip(t *testing.T) {
 		t.Errorf("findings %+v; want a skip that says optional", fs)
 	}
 }
+
+func TestWriteOnlyFindingsNameGrantsThatReadDiffersFor(t *testing.T) {
+	fs := writeOnlyFindings(map[string]any{"filesystem": map[string]any{
+		"denyRead":   []any{"/h"},
+		"allowRead":  []any{"/h/.claude"},
+		"allowWrite": []any{"/tmp", "/h/.aws/sso/cache", "/h/.claude", "/h/.claude/debug"},
+	}})
+	if len(fs) != 1 || fs[0].status != statusWarn || fs[0].label != `allowWrite "/h/.aws/sso/cache"` ||
+		!strings.Contains(fs[0].msg, `denyRead "/h"`) {
+		t.Errorf("findings %+v; want one warning for the grant no allowRead covers", fs)
+	}
+}

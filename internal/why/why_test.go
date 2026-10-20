@@ -206,3 +206,49 @@ func TestPathFollowsLinksToTheRuleThatApplies(t *testing.T) {
 		t.Errorf("did not blame the rule on the link's target:\n%s", b.String())
 	}
 }
+
+func TestPathUnderDenyReadWithOnlyAWriteGrant(t *testing.T) {
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	home := filepath.Join(dir, "home")
+	cache := filepath.Join(home, "sso cache")
+	os.MkdirAll(cache, 0o755)
+	info := filepath.Join(dir, "mountinfo")
+	t.Cleanup(func() { mountinfo = "/proc/self/mountinfo" })
+	mountinfo = info
+	deny := `denyRead "` + home + `" (base.json)`
+	allow := `allowWrite "` + cache + `" (p.json)`
+	for _, c := range []struct {
+		name, os, mounts string
+		perm             os.FileMode // stands in for what srt does to the directory
+		want             []string
+	}{
+		{"bound back on Linux", "linux", "1 0 0:1 / " + strings.ReplaceAll(cache, " ", `\040`) + " rw - ext4 /dev/vda1 rw\n", 0o755, []string{
+			`read:  yes       ` + allow + ` re-opens ` + deny + ` on Linux; on macOS it grants writes only, so list it in allowRead to read it there`,
+			`write: yes       ` + allow,
+		}},
+		{"missing at launch on Linux", "linux", "", 0o755, []string{
+			`read:  scratch   ` + deny + ` masks it with a scratch filesystem: reads see only what this session wrote`,
+			`write: discarded ` + deny + ` masks it with a scratch filesystem: writes succeed, then vanish when the session ends; srt binds ` + allow + ` back only when it exists at launch`,
+		}},
+		{"macOS", "darwin", "", 0o300, []string{
+			`read:  no        ` + deny + `; ` + allow + ` grants writes only on macOS, though Linux reads it too; list it in allowRead to read it`,
+			`write: yes       ` + allow,
+		}},
+	} {
+		os.WriteFile(info, []byte(c.mounts), 0o644)
+		os.Chmod(cache, c.perm)
+		pol := &policy.Policy{OS: c.os, Settings: map[string]any{"filesystem": map[string]any{
+			"denyRead": []any{home}, "allowWrite": []any{cache},
+		}}, Sources: map[string]map[string]string{
+			"filesystem.denyRead": {home: "base.json"}, "filesystem.allowWrite": {cache: "p.json"},
+		}}
+		var b strings.Builder
+		Path(&b, pol, cache)
+		for _, want := range c.want {
+			if !strings.Contains(b.String(), want) {
+				t.Errorf("%s: missing %q in:\n%s", c.name, want, b.String())
+			}
+		}
+	}
+	os.Chmod(cache, 0o755)
+}

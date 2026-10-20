@@ -91,8 +91,9 @@ it your rc file, so srtbox gives zsh and bash an rc file of its own, in the
 session's private directory, that loads yours when the sandbox can read it and
 then marks the prompt. Other shells get the mark through `PS1`.
 
-`doctor` loads the project's config, checks srt's version, the brokered
-programs and each `_inject` source (never printing a value), then starts a
+`doctor` loads the project's config, warns about each `allowWrite` path whose
+reads differ by platform, checks srt's version, the brokered programs and each
+`_inject` source (never printing a value), then starts a
 session that runs `true`. That last step is the one that shows srt can build
 the sandbox on this machine; when it fails on Linux, doctor also says whether
 AppArmor's restriction on user namespaces is the cause. It exits non-zero
@@ -121,6 +122,15 @@ Reads are allowed everywhere unless denied: `denyRead` is a blocklist, and
 `allowRead` re-opens paths inside it. With `denyRead: ["~"]` the sandbox still
 reads `/etc`, `/tmp` and anything else outside your home directory. Writes are
 the reverse: denied everywhere except `allowWrite`.
+
+An `allowWrite` path inside a `denyRead` one, with no `allowRead` entry for
+it, reads differently by platform. On Linux, srt binds it back from the host,
+so the sandbox reads its real contents. On macOS, the sandbox can write it but
+not read it. Both keep what the sandbox writes. To read it on both, list it in
+`allowRead` too; `srtbox doctor` warns about each such path. On Linux, srt
+binds the path back only if it exists at launch: one made later sits on a
+scratch filesystem whose contents vanish when the session ends, so create it
+first with `_mkdir`.
 
 Keep this directory outside every project you sandbox. A policy file inside a
 project tree is writable from inside the sandbox, and the next launch would
@@ -360,7 +370,8 @@ session; on the host it starts a session for the project (`-p`, or the one
 whose `_root` holds the working directory) and asks from there. It also
 recognises the cases that look like something else: a path hidden by
 `denyRead` reads as missing, a write under a masked directory succeeds and is
-discarded, a write grant inside a re-opened read grant stays read-only, and a
+discarded, a write grant under `denyRead` reads on Linux but not on macOS, a
+write grant inside a re-opened read grant stays read-only, and a
 file under `credentials.files` is hidden or reads as a placeholder.
 
 At launch srtbox records the session's merged policy, with each rule's source,

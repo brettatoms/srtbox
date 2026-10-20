@@ -19,6 +19,36 @@ check "allowRead re-opens a path inside it" open sbx fs cat private/open/b
 check "why names the denyRead rule" "denyRead \"$T/fs/private\" (fs.json)" \
   sbx fs srtbox why private/a
 
+# An allowWrite path under denyRead that no allowRead covers: srt on Linux
+# binds it back from the host, readable, and on macOS makes it write-only.
+project wo <<EOF
+{"_root": "$T/wo",
+ "filesystem": {
+   "denyRead": ["$T/wo/home"],
+   "allowWrite": ["$T/wo/home/cache", "$T/wo/home/later"]}}
+EOF
+mkdir -p "$T/wo/home/cache"
+echo host-token > "$T/wo/home/cache/token"
+
+sbx wo sh -c 'echo x > home/cache/new'
+check "a write under denyRead reaches the host" x cat "$T/wo/home/cache/new"
+if [ "$os" = Linux ]; then
+  check "on Linux, allowWrite re-opens a denyRead path" host-token sbx wo cat home/cache/token
+  check "why says allowWrite re-opens it on Linux" \
+    "allowWrite \"$T/wo/home/cache\" (wo.json) re-opens denyRead \"$T/wo/home\" (wo.json) on Linux" \
+    sbx wo srtbox why home/cache
+  check "on Linux, an allowWrite path made after launch is scratch" "read:  scratch" \
+    sbx wo sh -c 'mkdir home/later && srtbox why home/later'
+else
+  check "on macOS, allowWrite leaves a denyRead path unreadable" refused \
+    sbx wo sh -c 'cat home/cache/token || echo refused'
+  check "why says allowWrite grants writes only on macOS" \
+    "allowWrite \"$T/wo/home/cache\" (wo.json) grants writes only on macOS" \
+    sbx wo srtbox why home/cache
+fi
+check "doctor warns that reads differ by platform" "⚠ allowWrite \"$T/wo/home/cache\"" \
+  sh -c "cd '$T/wo' && srtbox doctor -p wo"
+
 if command -v git >/dev/null; then
   git init -q "$T/fs/inner"
   echo '{}' > "$T/fs/inner/.mcp.json"

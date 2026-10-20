@@ -13,6 +13,7 @@ import (
 
 	"github.com/brettatoms/srtbox/internal/broker"
 	"github.com/brettatoms/srtbox/internal/config"
+	"github.com/brettatoms/srtbox/internal/policy"
 )
 
 // MinSrt is the oldest srt srtbox works with. From 0.0.76 srt exits after the
@@ -56,8 +57,9 @@ func Doctor(args []string) int {
 	}
 	layers, err := config.Layers(project)
 	var meta config.Meta
+	var settings map[string]any
 	if err == nil {
-		meta, _, err = Build(project)
+		meta, settings, err = Build(project)
 	}
 	if err != nil {
 		fs = append(fs, finding{statusFail, "config " + project, err.Error()})
@@ -68,6 +70,7 @@ func Doctor(args []string) int {
 		names = append(names, l.Name)
 	}
 	fs = append(fs, finding{statusOK, "config " + project, strings.Join(names, ", ")})
+	fs = append(fs, writeOnlyFindings(settings)...)
 
 	srt := srtFinding(srtVersion())
 	fs = append(fs, srt)
@@ -177,6 +180,29 @@ func injectFindings(raw map[string]any) []finding {
 			continue
 		}
 		fs = append(fs, finding{statusOK, "inject " + n, ""})
+	}
+	return fs
+}
+
+// writeOnlyFindings warns about each allowWrite path under a denyRead entry
+// that no allowRead entry covers. srt on Linux binds such a path back from
+// the host, readable, and on macOS lets the sandbox write it but not read it.
+func writeOnlyFindings(settings map[string]any) []finding {
+	within := func(p, key string) string {
+		for _, e := range policy.Strings(settings, "filesystem", key) {
+			if config.Within(config.Home(p), config.Home(e)) {
+				return e
+			}
+		}
+		return ""
+	}
+	var fs []finding
+	for _, w := range policy.Strings(settings, "filesystem", "allowWrite") {
+		if d := within(w, "denyRead"); d != "" && within(w, "allowRead") == "" {
+			fs = append(fs, finding{statusWarn, fmt.Sprintf("allowWrite %q", w), fmt.Sprintf(
+				"under denyRead %q with no allowRead: the sandbox can read it on Linux but not on macOS; "+
+					"add it to allowRead to read it on both, or drop it to read it on neither", d)})
+		}
 	}
 	return fs
 }

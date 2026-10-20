@@ -102,7 +102,13 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 	}
 	denyR, allowR := deepest(pol, "denyRead", r), deepest(pol, "allowRead", r)
 	allowW, denyW := deepest(pol, "allowWrite", r), deepest(pol, "denyWrite", r)
-	masked := denyR != "" && allowR == ""
+	// srt on Linux binds an allowWrite path under a denyRead directory back
+	// from the host, which re-opens it for reads too. It can do so only for a
+	// path that exists at launch, so the mount is what says it did. On macOS
+	// such a grant is write-only.
+	writeOnly := denyR != "" && allowR == "" && allowW != "" && covers(config.Home(denyR), config.Home(allowW))
+	reopened := writeOnly && pol.OS == "linux" && mounted(config.Home(allowW))
+	masked := denyR != "" && allowR == "" && !reopened
 	var hidden, maskRead, maskWrite string
 	if f, ok := credentialFile(pol, r); ok {
 		src := fmt.Sprintf("credentials.files %q (%s)", f.Path, pol.Source("credentials.files", f.Path))
@@ -136,8 +142,16 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 		line(w, "read", "no", "does not exist")
 	case readErr == nil && allowR != "" && denyR != "":
 		line(w, "read", "yes", rule(pol, "allowRead", allowR)+" re-opens "+rule(pol, "denyRead", denyR))
+	case readErr == nil && reopened:
+		line(w, "read", "yes", rule(pol, "allowWrite", allowW)+" re-opens "+rule(pol, "denyRead", denyR)+
+			" on Linux; on macOS it grants writes only, so list it in allowRead to read it there")
+	case readErr == nil && masked && pol.OS == "linux":
+		line(w, "read", "scratch", rule(pol, "denyRead", denyR)+" masks it with a scratch filesystem: reads see only what this session wrote")
 	case readErr == nil:
 		line(w, "read", "yes", "no rule denies it")
+	case masked && writeOnly && pol.OS == "darwin":
+		line(w, "read", "no", rule(pol, "denyRead", denyR)+"; "+rule(pol, "allowWrite", allowW)+
+			" grants writes only on macOS, though Linux reads it too; list it in allowRead to read it")
 	case masked:
 		line(w, "read", "no", rule(pol, "denyRead", denyR))
 	default:
@@ -160,7 +174,11 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 	case writeErr != nil && maskWrite != "":
 		line(w, "write", "no", maskWrite)
 	case writeErr == nil && masked && pol.OS == "linux":
-		line(w, "write", "discarded", rule(pol, "denyRead", denyR)+" masks it with a scratch filesystem: writes succeed, then vanish when the session ends")
+		why := rule(pol, "denyRead", denyR) + " masks it with a scratch filesystem: writes succeed, then vanish when the session ends"
+		if writeOnly {
+			why += "; srt binds " + rule(pol, "allowWrite", allowW) + " back only when it exists at launch"
+		}
+		line(w, "write", "discarded", why)
 	case writeErr == nil && allowW != "":
 		line(w, "write", "yes", rule(pol, "allowWrite", allowW))
 	case writeErr == nil:
@@ -212,6 +230,36 @@ func resolve(p string) string {
 	}
 	return cur
 }
+
+// mountinfo lists the session's mounts on Linux.
+var mountinfo = "/proc/self/mountinfo"
+
+// mounted reports whether something is mounted at p, under its own name or
+// where its links lead. The mount point is the fifth field, with spaces and
+// other special characters as octal escapes.
+func mounted(p string) bool {
+	b, err := os.ReadFile(mountinfo)
+	if err != nil {
+		return false
+	}
+	p, r := filepath.Clean(p), resolve(filepath.Clean(p))
+	for _, l := range strings.Split(string(b), "\n") {
+		f := strings.Fields(l)
+		if len(f) < 5 {
+			continue
+		}
+		mp := octal.ReplaceAllStringFunc(f[4], func(e string) string {
+			n, _ := strconv.ParseUint(e[1:], 8, 8)
+			return string(rune(n))
+		})
+		if mp == p || mp == r {
+			return true
+		}
+	}
+	return false
+}
+
+var octal = regexp.MustCompile(`\\[0-3][0-7]{2}`)
 
 func probeRead(p string, info os.FileInfo, statErr error) error {
 	if statErr != nil {
