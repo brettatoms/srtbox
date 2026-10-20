@@ -161,7 +161,12 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 	// Write.
 	if _, err := os.Stat(filepath.Dir(p)); !exists && err != nil {
 		why := "its directory does not exist here"
-		if masked {
+		switch {
+		case srtPatternProtects(pol, r):
+			// Creating the directory succeeds; the write inside it does not.
+			why = "srt protects this name itself beneath " + pol.Cwd +
+				", where it started, and on macOS that holds before the directory exists (" + srtNames + ")"
+		case masked:
 			why += ", hidden by " + rule(pol, "denyRead", denyR)
 		}
 		line(w, "write", "no", why)
@@ -196,7 +201,7 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 		line(w, "write", "no", rule(pol, "allowWrite", allowW)+" sits inside "+rule(pol, "allowRead", r)+
 			", whose read-only grant covers it; grant writes on a path outside every allowRead entry")
 	case srtProtects(p):
-		line(w, "write", "no", "srt protects this name itself (shell rc files, .gitconfig, .gitmodules, .mcp.json, .vscode, .idea, .claude/commands and agents, .git/hooks and .git/config)")
+		line(w, "write", "no", "srt protects this name itself ("+srtNames+")")
 	default:
 		line(w, "write", "no", rule(pol, "allowWrite", allowW)+" covers it, but the write failed: "+writeErr.Error())
 	}
@@ -359,6 +364,27 @@ var (
 	srtFiles = []string{".gitconfig", ".gitmodules", ".bashrc", ".bash_profile", ".zshrc", ".zprofile", ".profile", ".ripgreprc", ".mcp.json"}
 	srtDirs  = []string{"/.vscode", "/.idea", "/.claude/commands", "/.claude/agents", "/.git/hooks", "/.git/config"}
 )
+
+const srtNames = "shell rc files, .gitconfig, .gitmodules, .mcp.json, .vscode, .idea, .claude/commands and agents, .git/hooks and .git/config"
+
+// srtPatternProtects reports whether srt protects p by pattern, which it does
+// on macOS only. There srt denies writes to its names, and inside its
+// directories, anywhere beneath the directory it started in, whether or not
+// they exist at launch. On Linux it protects only the ones that exist.
+func srtPatternProtects(pol *policy.Policy, p string) bool {
+	if pol.OS != "darwin" || pol.Cwd == "" || !config.Within(p, pol.Cwd) {
+		return false
+	}
+	if slices.Contains(srtFiles, filepath.Base(p)) {
+		return true
+	}
+	for _, d := range srtDirs {
+		if strings.Contains(p, d+"/") {
+			return true
+		}
+	}
+	return false
+}
 
 // srtProtects reports whether p is one of the names srt write-protects on
 // its own.

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/brettatoms/srtbox/internal/config"
@@ -26,6 +27,7 @@ type Policy struct {
 	Project  string         `json:"project"`
 	Root     string         `json:"root"`
 	OS       string         `json:"os"`
+	Cwd      string         `json:"cwd"` // where srt started, links resolved
 	Settings map[string]any `json:"settings"`
 	Forward  []string       `json:"forward"`
 	DenyEnv  []string       `json:"denyEnv"`
@@ -49,8 +51,13 @@ func New(project string, meta config.Meta, settings map[string]any) (*Policy, er
 	if err != nil {
 		return nil, err
 	}
+	// srt inherits the launcher's working directory.
+	cwd, _ := os.Getwd()
+	if r, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = r
+	}
 	p := &Policy{
-		Project: project, Root: meta.Root, OS: runtime.GOOS, Settings: settings,
+		Project: project, Root: meta.Root, OS: runtime.GOOS, Cwd: cwd, Settings: settings,
 		Forward: meta.Forward, DenyEnv: meta.DenyEnv, AllowEnv: meta.AllowEnv,
 		Sources: map[string]map[string]string{},
 	}
