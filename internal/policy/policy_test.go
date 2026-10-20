@@ -26,7 +26,7 @@ func TestSourcesNameTheFileEachRuleCameFrom(t *testing.T) {
 		}},
 	}
 
-	p, err := New("p", config.Meta{}, settings)
+	p, err := New("p", config.Meta{}, settings, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestSourcesNameTheDefaultProject(t *testing.T) {
 	t.Chdir(dir)
 	settings := map[string]any{"filesystem": map[string]any{"allowWrite": []any{dir}}}
 
-	p, err := New(config.DefaultProject, config.Meta{}, settings)
+	p, err := New(config.DefaultProject, config.Meta{}, settings, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestSourcesNameIncludedFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(conf, "p.json"), []byte(`{"_include":["include/team.json"],"network":{"allowedDomains":["both.example"]}}`), 0o600)
 	settings := map[string]any{"network": map[string]any{"allowedDomains": []any{"team.example", "both.example"}}}
 
-	p, err := New("p", config.Meta{}, settings)
+	p, err := New("p", config.Meta{}, settings, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,8 +83,9 @@ func TestNewRecordsTheDirectorySrtStartsIn(t *testing.T) {
 	t.Setenv("SRTBOX_CONFIG_DIR", conf)
 	os.WriteFile(filepath.Join(conf, "p.json"), []byte(`{}`), 0o600)
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
-	t.Chdir(dir)
-	p, err := New("p", config.Meta{}, map[string]any{})
+	link := filepath.Join(t.TempDir(), "link")
+	os.Symlink(dir, link)
+	p, err := New("p", config.Meta{}, map[string]any{}, link)
 	if err != nil {
 		t.Fatal(err)
 	}

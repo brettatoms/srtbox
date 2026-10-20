@@ -49,8 +49,10 @@ input to code running unsandboxed on the host.
   differently on each platform. On macOS it denies them by pattern anywhere
   beneath the directory it started in, including paths that do not exist yet,
   so a new git worktree there cannot be checked out. On Linux it protects only
-  the ones that exist at launch. `srtbox why` reads the start directory from
-  the policy's `cwd`.
+  the ones that exist at launch. On macOS srtbox therefore starts srt in the
+  session directory and passes the working directory as `SRTBOX_CWD`, which
+  `srtbox init` returns to. `srtbox why` reads the start directory from the
+  policy's `cwd`.
 - bwrap fails the whole launch if a `denyWrite` path sits under another
   `denyWrite` path that does not exist yet. `ProtectRepos` drops paths that a
   protected ancestor already covers.

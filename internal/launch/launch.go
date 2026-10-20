@@ -210,7 +210,19 @@ func session(opts options, cmdArgs []string) int {
 	}
 	scopeUnixSockets(settings, runtime.GOOS, append(sockets, sess, tmp)...)
 
-	pol, err := policy.New(project, meta, settings)
+	// On macOS srt denies writes to its protected names (.idea, .claude/agents
+	// and the rest) by pattern anywhere beneath the directory it starts in,
+	// even where they do not exist yet, so no new git worktree there can be
+	// checked out. srt starts in the session directory instead, and `srtbox
+	// init` returns to the working directory. ProtectRepos covers the repos.
+	cwd, _ := os.Getwd()
+	srtDir := cwd
+	if runtime.GOOS == "darwin" {
+		srtDir = sess
+	}
+	env = append(env, sandbox.CwdEnv+"="+cwd)
+
+	pol, err := policy.New(project, meta, settings, srtDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "srtbox:", err)
 		return 1
@@ -258,6 +270,7 @@ func session(opts options, cmdArgs []string) int {
 	}
 	cmd := exec.Command(srt, append(append(srtArgs, "--", exe, "init", "--"), cmdArgs...)...)
 	cmd.Env = env
+	cmd.Dir = srtDir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if controlR != nil {
 		cmd.ExtraFiles = []*os.File{controlR}

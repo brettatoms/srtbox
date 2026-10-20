@@ -44,15 +44,13 @@ var sections = [][2]string{
 	{"network", "allowedDomains"}, {"network", "deniedDomains"},
 }
 
-// New builds the policy for project from its final settings. Rules found in
-// no config file were added by srtbox.
-func New(project string, meta config.Meta, settings map[string]any) (*Policy, error) {
+// New builds the policy for project from its final settings. cwd is the
+// directory srt starts in. Rules found in no config file were added by srtbox.
+func New(project string, meta config.Meta, settings map[string]any, cwd string) (*Policy, error) {
 	layers, err := config.Layers(project)
 	if err != nil {
 		return nil, err
 	}
-	// srt inherits the launcher's working directory.
-	cwd, _ := os.Getwd()
 	if r, err := filepath.EvalSymlinks(cwd); err == nil {
 		cwd = r
 	}

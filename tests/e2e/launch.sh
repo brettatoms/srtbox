@@ -10,6 +10,11 @@ check "SRTBOX_PROJECT and SRTBOX_ROOT are set" "launch $T/launch" \
   sbx launch sh -c 'echo "$SRTBOX_PROJECT $SRTBOX_ROOT"'
 check "_env sets a variable, expanding ~" "e2e=$HOME/e2e" \
   sbx launch sh -c 'echo "e2e=$SRTBOX_E2E_HOME"'
+mkdir -p "$T/launch/sub"
+printf '#!/bin/sh\npwd\n' > "$T/launch/sub/here"
+chmod +x "$T/launch/sub/here"
+check "the command runs in the launch directory" "$T/launch/sub" \
+  sh -c "cd '$T/launch/sub' && srtbox run -p launch -- ./here"
 check "list names the project" launch srtbox list
 check "show prints what srtbox adds" "\"$T/bin/srtbox\"" srtbox show launch
 

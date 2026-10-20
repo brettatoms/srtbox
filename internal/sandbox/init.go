@@ -13,6 +13,10 @@ import (
 	"github.com/brettatoms/srtbox/internal/netproxy"
 )
 
+// CwdEnv names the variable that carries the launcher's working directory to
+// srtbox init, which may start elsewhere.
+const CwdEnv = "SRTBOX_CWD"
+
 // Init is the first process inside the sandbox. It does what srt cannot do from
 // outside, then runs the command:
 //
@@ -20,6 +24,8 @@ import (
 //     its own network namespace, following ports that start or move later
 //   - relays terminal resizes, on Linux, where srt's bwrap --new-session means
 //     the kernel never delivers SIGWINCH inside
+//   - returns to the launcher's working directory, on macOS, where srt starts
+//     in the session directory
 //   - restores GIT_SSH_COMMAND for --ssh, which srt overwrites with its own
 //   - runs the _init hooks and sets the variables they print
 //   - forwards termination signals and reports a signal death as 128+N
@@ -33,6 +39,12 @@ func Init(args []string) int {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: srtbox init -- <command> [args...]")
 		return 2
+	}
+	if d := os.Getenv(CwdEnv); d != "" {
+		if err := os.Chdir(d); err != nil {
+			fmt.Fprintln(os.Stderr, "srtbox:", err)
+			return 1
+		}
 	}
 	if v := os.Getenv("SRTBOX_GIT_SSH_COMMAND"); v != "" {
 		os.Setenv("GIT_SSH_COMMAND", v)

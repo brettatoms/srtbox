@@ -52,6 +52,7 @@ check "doctor warns that reads differ by platform" "⚠ allowWrite \"$T/wo/home/
 if command -v git >/dev/null; then
   git init -q "$T/fs/inner"
   echo '{}' > "$T/fs/inner/.mcp.json"
+  mkdir "$T/fs/inner/.idea"
   check "a nested repo's .git/config is read-only" refused \
     sbx fs sh -c 'echo x >> inner/.git/config || echo refused'
   check "a nested repo's hooks can't be created" refused \
@@ -60,6 +61,13 @@ if command -v git >/dev/null; then
     sbx fs sh -c 'echo x >> inner/.mcp.json || echo refused'
   check "a nested repo's other files are writable" written \
     sbx fs sh -c 'echo x > inner/file && echo written'
+  check "a nested repo's .idea is read-only" refused \
+    sbx fs sh -c 'echo x > inner/.idea/f || echo refused'
+  # A new git worktree checks out its own .idea and .claude/agents.
+  check "an .idea made in the session is writable" written \
+    sbx fs sh -c 'mkdir -p wt/.idea && echo x > wt/.idea/f && echo written'
+  check "a .claude/agents made in the session is writable" written \
+    sbx fs sh -c 'mkdir -p wt/.claude/agents && echo x > wt/.claude/agents/a.md && echo written'
 else
   skip "nested repos" "git is not installed"
 fi

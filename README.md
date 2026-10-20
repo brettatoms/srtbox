@@ -231,6 +231,14 @@ repo has none. srt blocks creating a missing path by mounting over it, which
 leaves an empty placeholder in the working tree for the whole session: it shows
 up in `git status` and stops the directory being removed.
 
+**On macOS, srt starts in the session directory.** There srt denies writes to
+these names by pattern anywhere beneath the directory it starts in, even where
+they don't exist yet, so a new git worktree under the working directory can't
+be checked out. srtbox starts srt in its session directory, and `srtbox init`
+returns to the working directory before it runs the command. The repos under
+`_root` keep the protection that the preceding paragraphs describe, the same as
+on Linux.
+
 **The login ssh-agent is withheld.** `SSH_AUTH_SOCK` is unset and its socket
 masked, because the path alone is enough to use it. `--ssh` opens chosen hosts
 instead. See [SSH](#ssh).
@@ -371,9 +379,7 @@ whose `_root` holds the working directory) and asks from there. It also
 recognises the cases that look like something else: a path hidden by
 `denyRead` reads as missing, a write under a masked directory succeeds and is
 discarded, a write grant under `denyRead` reads on Linux but not on macOS, a
-write grant inside a re-opened read grant stays read-only, a name srt
-protects on macOS is refused even inside a directory that does not exist yet
-(a new git worktree's `.idea`, for example), and a file under
+write grant inside a re-opened read grant stays read-only, and a file under
 `credentials.files` is hidden or reads as a placeholder.
 
 At launch srtbox records the session's merged policy, with each rule's source,
