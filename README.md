@@ -371,8 +371,10 @@ whose `_root` holds the working directory) and asks from there. It also
 recognises the cases that look like something else: a path hidden by
 `denyRead` reads as missing, a write under a masked directory succeeds and is
 discarded, a write grant under `denyRead` reads on Linux but not on macOS, a
-write grant inside a re-opened read grant stays read-only, and a
-file under `credentials.files` is hidden or reads as a placeholder.
+write grant inside a re-opened read grant stays read-only, a name srt
+protects on macOS is refused even inside a directory that does not exist yet
+(a new git worktree's `.idea`, for example), and a file under
+`credentials.files` is hidden or reads as a placeholder.
 
 At launch srtbox records the session's merged policy, with each rule's source,
 in a private session directory that the sandbox can read.

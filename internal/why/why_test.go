@@ -207,6 +207,32 @@ func TestPathFollowsLinksToTheRuleThatApplies(t *testing.T) {
 	}
 }
 
+func TestPathBlamesSrtForAProtectedNameInAMissingDirectory(t *testing.T) {
+	// A new git worktree is the usual case: its directory does not exist yet,
+	// and checking it out writes .idea and .claude/agents inside it.
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	srt := "srt protects this name itself beneath " + dir
+	for _, c := range []struct {
+		name, os, cwd, path, want string
+	}{
+		{"macOS, beneath srt's directory", "darwin", dir, filepath.Join(dir, "wt", ".idea", "x"), srt},
+		{"macOS, nested name", "darwin", dir, filepath.Join(dir, "wt", ".claude", "agents", "x.md"), srt},
+		{"macOS, an ordinary name", "darwin", dir, filepath.Join(dir, "wt", "src", "x"), "its directory does not exist here"},
+		{"macOS, outside srt's directory", "darwin", filepath.Join(dir, "elsewhere"), filepath.Join(dir, "wt", ".idea", "x"), "its directory does not exist here"},
+		{"Linux protects only what exists", "linux", dir, filepath.Join(dir, "wt", ".idea", "x"), "its directory does not exist here"},
+		{"no directory recorded", "darwin", "", filepath.Join(dir, "wt", ".idea", "x"), "its directory does not exist here"},
+	} {
+		pol := &policy.Policy{OS: c.os, Cwd: c.cwd, Settings: map[string]any{"filesystem": map[string]any{
+			"allowWrite": []any{dir},
+		}}, Sources: map[string]map[string]string{"filesystem.allowWrite": {dir: "p.json"}}}
+		var b strings.Builder
+		Path(&b, pol, c.path)
+		if !strings.Contains(b.String(), "write: no        "+c.want) {
+			t.Errorf("%s: missing %q in:\n%s", c.name, c.want, b.String())
+		}
+	}
+}
+
 func TestPathUnderDenyReadWithOnlyAWriteGrant(t *testing.T) {
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	home := filepath.Join(dir, "home")

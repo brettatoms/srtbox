@@ -77,3 +77,18 @@ func TestSourcesNameIncludedFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestNewRecordsTheDirectorySrtStartsIn(t *testing.T) {
+	conf := t.TempDir()
+	t.Setenv("SRTBOX_CONFIG_DIR", conf)
+	os.WriteFile(filepath.Join(conf, "p.json"), []byte(`{}`), 0o600)
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Chdir(dir)
+	p, err := New("p", config.Meta{}, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Cwd != dir {
+		t.Errorf("Cwd = %q, want %q", p.Cwd, dir)
+	}
+}

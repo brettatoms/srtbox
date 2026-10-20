@@ -44,6 +44,13 @@ input to code running unsandboxed on the host.
 - On Linux, srt binds an `allowWrite` path under a `denyRead` tmpfs back from
   the host, readable, if the path exists at launch; on macOS such a path is
   write-only. `srtbox why` checks `/proc/self/mountinfo` for that bind.
+- srt write-protects its own names (shell rc files, `.mcp.json`, `.vscode`,
+  `.idea`, `.claude/commands`, `.claude/agents`, `.git/hooks`, `.git/config`)
+  differently on each platform. On macOS it denies them by pattern anywhere
+  beneath the directory it started in, including paths that do not exist yet,
+  so a new git worktree there cannot be checked out. On Linux it protects only
+  the ones that exist at launch. `srtbox why` reads the start directory from
+  the policy's `cwd`.
 - bwrap fails the whole launch if a `denyWrite` path sits under another
   `denyWrite` path that does not exist yet. `ProtectRepos` drops paths that a
   protected ancestor already covers.
