@@ -216,6 +216,11 @@ func session(opts options, cmdArgs []string) int {
 	// checked out. srt starts in the session directory instead, and `srtbox
 	// init` returns to the working directory. ProtectRepos covers the repos.
 	cwd, _ := os.Getwd()
+	// A cwd reached through a symlink may not exist inside the sandbox; use
+	// the resolved path.
+	if real, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = real
+	}
 	srtDir := cwd
 	if runtime.GOOS == "darwin" {
 		srtDir = sess
