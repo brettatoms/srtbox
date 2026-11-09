@@ -10,7 +10,7 @@ import (
 )
 
 func TestSrtFinding(t *testing.T) {
-	for have, want := range map[string]string{"0.0.76": statusOK, "0.0.79": statusOK, "0.1.0": statusOK, "0.0.75": statusFail, "": statusFail} {
+	for have, want := range map[string]string{"0.0.80": statusOK, "0.0.81": statusOK, "0.1.0": statusOK, "0.0.79": statusFail, "0.0.76": statusFail, "": statusFail} {
 		if got := srtFinding(have).status; got != want {
 			t.Errorf("srt %q: %s; want %s", have, got, want)
 		}

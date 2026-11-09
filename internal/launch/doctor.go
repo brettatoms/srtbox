@@ -18,7 +18,9 @@ import (
 
 // MinSrt is the oldest srt srtbox works with. From 0.0.76 srt exits after the
 // command when --control-fd is a pipe, which following a portfile relies on.
-const MinSrt = "0.0.76"
+// From 0.0.80 a sandboxed command on Linux cannot create user or mount
+// namespaces, with which it could remove the binds that enforce denyWrite.
+const MinSrt = "0.0.80"
 
 // apparmorSysctl is 1 on Ubuntu 23.10 and later, where a program without an
 // AppArmor profile, such as a bubblewrap from nix, cannot create the user
