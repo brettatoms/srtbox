@@ -12,7 +12,8 @@ cd ~/src/myproject && srtbox run claude
 
 ## Install
 
-srtbox needs srt 0.0.76 or later on `PATH`; with an older srt a session never
+srtbox needs srt 0.0.80 or later on `PATH`. With an older srt a sandboxed
+command on Linux can lift the write denies, and before 0.0.76 a session never
 exits. On Linux, srt also needs bubblewrap and socat; the nixpkgs
 `sandbox-runtime` package includes both.
 

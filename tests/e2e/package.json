@@ -3,6 +3,6 @@
   "private": true,
   "description": "The srt release CI runs the e2e checks against. Update it with npm install --ignore-scripts --package-lock-only.",
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "0.0.78"
+    "@anthropic-ai/sandbox-runtime": "0.0.81"
   }
 }
