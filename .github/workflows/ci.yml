@@ -66,7 +66,6 @@ jobs:
           # Ubuntu strips capabilities from unprivileged user namespaces, and
           # bubblewrap needs them.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          sudo aa-status | grep -i bwrap || true
           # Ubuntu's bwrap-userns-restrict AppArmor profile strips capabilities
           # from what bwrap runs, so srt's nested user namespace fails.
           if [ -e /etc/apparmor.d/bwrap-userns-restrict ]; then
