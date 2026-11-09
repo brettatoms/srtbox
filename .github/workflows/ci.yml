@@ -66,6 +66,11 @@ jobs:
           # Ubuntu strips capabilities from unprivileged user namespaces, and
           # bubblewrap needs them.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          # Ubuntu's bwrap-userns-restrict AppArmor profile strips capabilities
+          # from what bwrap runs, so srt's nested user namespace fails.
+          if [ -e /etc/apparmor.d/bwrap-userns-restrict ]; then
+            sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict
+          fi
       - name: install srt
         working-directory: tests/e2e
         run: npm ci --ignore-scripts --no-audit --no-fund
