@@ -1,5 +1,5 @@
-# Filesystem policy: allowWrite, denyRead and allowRead, and nested-repo
-# protection.
+# Filesystem policy: allowWrite, denyRead and allowRead, nested-repo and
+# agent-config protection, and the hidden runtime directory.
 project fs <<EOF
 {"_root": "$T/fs",
  "filesystem": {
@@ -70,4 +70,63 @@ if command -v git >/dev/null; then
     sbx fs sh -c 'mkdir -p wt/.claude/agents && echo x > wt/.claude/agents/a.md && echo written'
 else
   skip "nested repos" "git is not installed"
+fi
+
+# Claude Code's config: srtbox denies writes to what Claude Code loads outside
+# the sandbox, and leaves the rest of its directory writable. On Linux a
+# missing directory is created first and denied; a missing file stays
+# writable, since srt could deny it only by creating it on the host.
+export CLAUDE_CONFIG_DIR="$T/claude"
+mkdir -p "$T/claude/hooks" "$T/skills-repo"
+echo '{}' > "$T/claude/settings.json"
+ln -s "$T/skills-repo" "$T/claude/skills"
+project agent <<EOF
+{"_root": "$T/agent", "filesystem": {"allowWrite": ["$T/claude"]}}
+EOF
+project agent-off <<EOF
+{"_root": "$T/agent-off", "_protectAgentConfig": false, "filesystem": {"allowWrite": ["$T/claude"]}}
+EOF
+check "agent settings are read-only" refused \
+  sbx agent sh -c 'echo x >> "$CLAUDE_CONFIG_DIR/settings.json" || echo refused'
+check "agent hooks can't be added" refused \
+  sbx agent sh -c 'echo x > "$CLAUDE_CONFIG_DIR/hooks/h" || echo refused'
+check "a missing agent directory can't be made" refused \
+  sbx agent sh -c 'mkdir -p "$CLAUDE_CONFIG_DIR/agents" && echo x > "$CLAUDE_CONFIG_DIR/agents/a.md" || echo refused'
+check "the rest of the agent's directory is writable" written \
+  sbx agent sh -c 'mkdir -p "$CLAUDE_CONFIG_DIR/projects/p" && echo x > "$CLAUDE_CONFIG_DIR/projects/p/m.md" && echo written'
+check "why says Claude Code loads it" "Claude Code loads it outside the sandbox" \
+  sbx agent srtbox why "$T/claude/settings.json"
+check "_protectAgentConfig false leaves it writable" written \
+  sbx agent-off sh -c 'echo "{}" > "$CLAUDE_CONFIG_DIR/settings.json" && echo written'
+if [ "$os" = Linux ]; then
+  check "on Linux, a missing agent directory is created as a directory" dir \
+    sh -c "[ -d '$T/claude/agents' ] && echo dir"
+  check "on Linux, a missing agent file is left writable" written \
+    sbx agent sh -c 'echo x > "$CLAUDE_CONFIG_DIR/loop.md" && echo written'
+  rm -f "$T/claude/loop.md"
+  check "on Linux, doctor names the missing agent files" "not protected until they exist: " \
+    sh -c "cd '$T/agent' && srtbox doctor -p agent"
+  check "on Linux, a linked agent entry warns" "skills is a symbolic link" sbx agent true
+else
+  check "on macOS, a missing agent file can't be made" refused \
+    sbx agent sh -c 'echo x > "$CLAUDE_CONFIG_DIR/loop.md" || echo refused'
+fi
+unset CLAUDE_CONFIG_DIR
+
+# $XDG_RUNTIME_DIR holds the login session's sockets; on Linux srtbox hides
+# it, and allowRead re-opens a path under it.
+if [ "$os" = Linux ]; then
+  export XDG_RUNTIME_DIR="$T/runtime"
+  mkdir -p -m 700 "$XDG_RUNTIME_DIR/open"
+  echo secret > "$XDG_RUNTIME_DIR/bus"
+  echo open > "$XDG_RUNTIME_DIR/open/f"
+  project runtime <<EOF
+{"_root": "$T/runtime-proj", "filesystem": {"allowRead": ["$T/runtime/open"]}}
+EOF
+  check "on Linux, the runtime directory is hidden" refused \
+    sbx runtime sh -c 'cat "$XDG_RUNTIME_DIR/bus" || echo refused'
+  check "on Linux, allowRead re-opens a path in the runtime directory" open \
+    sbx runtime sh -c 'cat "$XDG_RUNTIME_DIR/open/f"'
+  check "why says what the runtime directory holds" "the login session's sockets" \
+    sbx runtime srtbox why "$T/runtime/bus"
 fi

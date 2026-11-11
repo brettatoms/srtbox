@@ -3,6 +3,13 @@
 README.md covers usage, configuration and the dev loop. These are the rules
 for changing the code that it does not cover.
 
+## What it guards against
+
+srtbox keeps a well-intentioned agent, process or bot from reaching further
+than it should. It is not proof against a malicious actor. Close an escape
+when you find one, but never describe srtbox, in docs, messages or comments,
+as stopping a determined attacker.
+
 ## Standard library only
 
 No third-party modules. A dependency enters the trust path of every sandbox
@@ -56,6 +63,20 @@ input to code running unsandboxed on the host.
 - bwrap fails the whole launch if a `denyWrite` path sits under another
   `denyWrite` path that does not exist yet. `ProtectRepos` drops paths that a
   protected ancestor already covers.
+- On Linux, srt denies a `denyWrite` path that does not exist by mounting
+  over it, which creates an empty file at that path on the host for the whole
+  session. `ProtectRepos` skips missing repo files; `ProtectAgentConfig`
+  creates missing directories first and leaves missing files writable.
+- On Linux, srt applies a `denyWrite` entry that is a symbolic link to where
+  the link leads, not to the link, so the link can be replaced from a
+  writable directory. `plantable` counts a `denyWrite` entry only when it
+  covers the directory holding a link, and `ProtectAgentConfig` warns about
+  linked entries.
+- srt's per-command network lists (`registerCommandNetworkLists`) are in its
+  library API only, and do not separate programs within one sandbox: the
+  proxy username that selects a list is the client's to choose. A credential
+  for one program goes through the broker's `env` instead, and never enters
+  the sandbox.
 
 ## GitHub Actions
 

@@ -24,7 +24,7 @@ const checkTimeout = 10 * time.Second
 type Server struct {
 	Programs map[string]*Program
 	Root     string   // callers' working directories are kept within it
-	Env      []string // the environment commands run with
+	Env      []string // the environment commands run with, before each program's own credentials
 	Approver *Approver
 }
 
@@ -85,7 +85,12 @@ func (s *Server) handle(conn net.Conn) {
 			return
 		}
 	}
-	s.run(conn, br, out, p, req, cwd)
+	env, err := p.environ(s.Env)
+	if err != nil {
+		refuse(fmt.Sprintf("%s was not run: %v", display(p.Name, req.Argv), err))
+		return
+	}
+	s.run(conn, br, out, p, req, cwd, env)
 }
 
 // workdir returns dir resolved, or an error when it is unknown, missing on
@@ -134,10 +139,10 @@ func (s *Server) check(p *Program, argv []string, cwd string) ([]byte, bool) {
 // terminal on the caller's side it gets a pseudo-terminal here. Input is
 // forwarded only when a stdin rule matches; otherwise the command reads
 // /dev/null, so a brokered command never consumes the caller's input.
-func (s *Server) run(conn net.Conn, br *bufio.Reader, out *frames, p *Program, req request, cwd string) {
+func (s *Server) run(conn net.Conn, br *bufio.Reader, out *frames, p *Program, req request, cwd string, env []string) {
 	wantIn := p.wantsStdin(req.Argv)
 	cmd := exec.Command(p.Path, req.Argv...)
-	cmd.Dir, cmd.Env = cwd, s.Env
+	cmd.Dir, cmd.Env = cwd, env
 
 	var (
 		input   io.WriteCloser

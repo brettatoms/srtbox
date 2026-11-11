@@ -1,25 +1,18 @@
 package launch
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"regexp"
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/brettatoms/srtbox/internal/config"
 	"github.com/brettatoms/srtbox/internal/policy"
 )
-
-// injectTimeout bounds each _inject command.
-const injectTimeout = 15 * time.Second
 
 var envVarName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
@@ -70,7 +63,7 @@ func inject(raw map[string]any, settings map[string]any) ([]string, error) {
 				return nil, fmt.Errorf("_inject.%s: %s is not in allowedDomains", name, h)
 			}
 		}
-		val, err := fetch(argv, in.Optional)
+		val, err := config.Fetch(argv, in.Optional)
 		if err != nil {
 			if !in.Optional {
 				warnf("srtbox: warning: _inject.%s: %v; the sandbox will not have it\n", name, err)
@@ -101,27 +94,6 @@ func inject(raw map[string]any, settings map[string]any) ([]string, error) {
 		terminateOnly(settings, allowed, hosts)
 	}
 	return env, nil
-}
-
-// fetch runs an _inject command and returns what it printed. A quiet fetch
-// discards the command's stderr.
-func fetch(argv []string, quiet bool) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), injectTimeout)
-	defer cancel()
-	c := exec.CommandContext(ctx, config.Home(argv[0]), argv[1:]...)
-	var out bytes.Buffer
-	c.Stdout = &out
-	if !quiet {
-		c.Stderr = os.Stderr
-	}
-	if err := c.Run(); err != nil {
-		return "", fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
-	}
-	v := strings.TrimSpace(out.String())
-	if v == "" {
-		return "", fmt.Errorf("%s printed nothing", strings.Join(argv, " "))
-	}
-	return v, nil
 }
 
 // coversHost reports whether allowedDomains pattern a admits every host that

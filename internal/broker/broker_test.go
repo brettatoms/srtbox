@@ -310,3 +310,48 @@ func TestAPendingApprovalDoesNotBlockGrantedCommands(t *testing.T) {
 		t.Error("a granted command waited on another command's approval")
 	}
 }
+
+func TestServerGivesAProgramItsCredentialsOnEachCall(t *testing.T) {
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	// The credential command counts its runs, so each call gets a new value.
+	count := filepath.Join(dir, "count")
+	token := script(t, dir, "token", `n=$(cat "`+count+`" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "`+count+`"; echo "tok-$n"`)
+	prog := &Program{
+		Name: "tool",
+		Path: script(t, dir, "tool", `echo "token=$TOOL_TOKEN"`),
+		Host: [][]string{{"show"}},
+		Env:  map[string]Credential{"TOOL_TOKEN": {From: []any{token}}},
+	}
+	sock := serve(t, &Server{Programs: map[string]*Program{"tool": prog}, Root: dir, Env: os.Environ()})
+	for _, want := range []string{"token=tok-1\n", "token=tok-2\n"} {
+		if r := call(t, sock, request{Program: "tool", Argv: []string{"show"}, Cwd: dir}, ""); r.stdout != want || r.code != 0 {
+			t.Errorf("got %+v, want stdout %q", r, want)
+		}
+	}
+
+	failing := &Program{
+		Name: "tool",
+		Path: prog.Path,
+		Host: [][]string{{"show"}},
+		Env:  map[string]Credential{"TOOL_TOKEN": {From: "false"}},
+	}
+	sock = serve(t, &Server{Programs: map[string]*Program{"tool": failing}, Root: dir, Env: os.Environ()})
+	if r := call(t, sock, request{Program: "tool", Argv: []string{"show"}, Cwd: dir}, ""); r.code != 126 || r.stdout != "" || !strings.Contains(r.stderr, "could not get TOOL_TOKEN") {
+		t.Errorf("a failed credential should refuse the call: %+v", r)
+	}
+}
+
+func TestParseChecksCredentials(t *testing.T) {
+	for _, env := range []map[string]any{
+		{"BAD-NAME": map[string]any{"from": "true"}},
+		{"TOKEN": map[string]any{}},
+	} {
+		if _, err := Parse(map[string]any{"sh": map[string]any{"env": env}}); err == nil {
+			t.Errorf("accepted env %v", env)
+		}
+	}
+	got, err := Parse(map[string]any{"sh": map[string]any{"env": map[string]any{"TOKEN": map[string]any{"from": "gh auth token"}}}})
+	if err != nil || got["sh"].Env["TOKEN"].From != "gh auth token" {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}

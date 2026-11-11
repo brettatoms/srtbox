@@ -6,6 +6,12 @@ per-project policy. srt limits the filesystem and network access of one process
 tree. srtbox adds layered config, protection for nested git repos, withheld
 credentials, access to host dev servers, terminal resizing, and scoped SSH.
 
+srtbox is not foolproof. It guards against a well-intentioned agent, process
+or bot reaching further than it should. A malicious actor could likely break
+out, through a gap in the policy, in srtbox, or in srt and the operating
+system's sandbox beneath it. Don't rely on it to contain code you wouldn't run
+on the host.
+
 ```
 cd ~/src/myproject && srtbox run claude
 ```
@@ -161,6 +167,7 @@ Keys starting with `_` are read by srtbox and never passed to srt:
 | `_inject` | Environment variables whose values srtbox fetches on the host and gives to the sandbox as placeholders. See [Credentials](#credentials). |
 | `_env` | Environment variables to set inside, as an object of names and string values, such as `{"PAGER": "less"}`. A leading `~` is expanded. A name that `_denyEnv` withholds stops the launch: pass a credential with `_inject`. srtbox's own `SRTBOX_*` variables take precedence. |
 | `_init` | Commands to run inside the sandbox before the command, which can set its environment. See [Hooks](#hooks). |
+| `_protectAgentConfig` | `false` lets the sandbox write Claude Code's config. See [What srtbox adds at launch](#what-srtbox-adds-at-launch). |
 
 An included file suits policy that someone else maintains, such as a team's,
 written by a setup tool while your own additions stay in the project file. Keep
@@ -212,6 +219,13 @@ exec srtbox run --ssh github.com -- claude "$@"
 Claude Code's hooks and MCP servers run inside the sandbox too, so the
 programs that they call must be readable there, for example in `~/.local/bin`.
 
+srtbox makes the parts of `~/.claude` that Claude Code loads on the host
+read-only (see [What srtbox adds at launch](#what-srtbox-adds-at-launch)), so
+Claude inside can't install or update plugins, change its settings, or add
+skills, agents or commands. Do those on the host. `~/.claude.json`, which holds
+MCP server definitions, and the memory files under `~/.claude/projects` stay
+writable, and Claude on the host loads both.
+
 ## What srtbox adds at launch
 
 **Nested repos are protected.** srt write-protects git hooks, git config and
@@ -231,6 +245,32 @@ protected only if present at launch, so a session can create one where the
 repo has none. srt blocks creating a missing path by mounting over it, which
 leaves an empty placeholder in the working tree for the whole session: it shows
 up in `git status` and stops the directory being removed.
+
+**Claude Code's config is read-only.** When an `allowWrite` entry makes Claude
+Code's config directory writable (`$CLAUDE_CONFIG_DIR`, or `~/.claude`),
+srtbox denies writes to what Claude Code loads or runs outside the sandbox:
+`settings.json`, `CLAUDE.md`, `hooks`, `plugins`, `skills`, `agents`,
+`commands`, `rules`, `output-styles`, `workflows`, `routines`,
+`scheduled_tasks.json`, `loop.md`, `launch.json`, `daemon.json`, `local`,
+`cowork_plugins`, `dev-mods` and `seed-admin`. The rest of the directory, such
+as `projects` and session state, stays writable. A path that an `allowWrite`
+entry names, or lies inside, stays writable too. Set `_protectAgentConfig` to
+`false` to turn this off.
+
+On Linux srt can deny a missing path only by mounting over it, which creates
+an empty file in its place on the host for the whole session. srtbox therefore
+creates a missing directory first, empty, and leaves a missing file writable;
+`srtbox doctor` lists those files. srt on Linux also protects only where a
+symbolic link leads, so the sandbox can replace a linked entry, such as a
+`skills` link to a checkout. srtbox warns about one at launch; make it a real
+directory.
+
+**On Linux, `$XDG_RUNTIME_DIR` is hidden.** It holds the login session's
+sockets, such as the D-Bus session bus, the keyring and an editor's server,
+and each acts on the host for whoever connects. An `allowRead` or `allowWrite`
+entry re-opens a path in it, such as a socket directory a tool shares with the
+host. macOS has no such directory; there srtbox limits sockets instead (see
+[Platforms](#platforms)).
 
 **On macOS, srt starts in the session directory.** There srt denies writes to
 these names by pattern anywhere beneath the directory it starts in, even where
@@ -417,6 +457,11 @@ That suits API tokens sent as `Authorization: token …` or `Bearer …`, but no
 HTTP Basic auth, which base64-encodes the token first: git over HTTPS cannot
 authenticate with an injected token. Use `--ssh` for git.
 
+`_inject` decides by host, not by program: any program in the sandbox that can
+reach `hosts` can use the credential, `curl` as much as `gh`. srt cannot tell
+programs within one sandbox apart. To give a credential to one program only,
+broker it and set its `env` (see [Broker](#broker)).
+
 **Credential files.** srt's `credentials.files` protects a file. A `deny`
 entry makes it unreadable and unwritable. A `mask` entry does for a file what
 `_inject` does for an environment variable: on Linux the sandbox reads a
@@ -478,16 +523,11 @@ placeholder works instead:
    On macOS, `from` is `security find-generic-password -a "$USER" -s
    srtbox-claude-token -w`.
 
-On Linux the desktop keyring is reachable over the D-Bus session bus whenever
-`allowAllUnixSockets` is on. Deny the bus socket to close it, and inject what
-tools used to fetch from the keyring:
-
-```json
-"filesystem": {"denyRead": ["${XDG_RUNTIME_DIR}/bus", "${XDG_RUNTIME_DIR}/keyring"]}
-```
-
-Anything inside that needs the session bus stops working, such as
-`notify-send` or `secret-tool`.
+On Linux the desktop keyring is reachable over the D-Bus session bus in
+`$XDG_RUNTIME_DIR`, which srtbox hides. Inject what tools used to fetch from
+the keyring. Anything inside that needs the session bus stops working, such as
+`notify-send` or `secret-tool`, and an `allowRead` entry that re-opens the bus
+re-opens the keyring with it.
 
 ## Broker
 
@@ -503,6 +543,11 @@ names programs whose matching commands run on the host instead:
     "host": [["aws", "logs"], ["db", "connect"]],
     "approve": [["wt", "remove"]],
     "stdin": [["db", "connect"]]
+  },
+  "gh": {
+    "env": {"GH_TOKEN": {"from": "gh auth token"}},
+    "host": [["pr", "view"], ["issue", "list"]],
+    "approve": [["pr", "create"], ["api"]]
   }
 }
 ```
@@ -522,16 +567,24 @@ runs the real program inside the sandbox as usual.
   leading words, using your host credentials.
 - `stdin` rules get the caller's input. Every other command reads `/dev/null`,
   so a brokered command never consumes input meant for something else.
+- `env` gives the program credentials that never enter the sandbox, not even
+  as a placeholder. For every call srtbox runs each `from` on the host (a shell
+  string or an argv array) and sets the value only in the brokered command's
+  environment. A `from` that fails or prints nothing refuses the call, and
+  `srtbox doctor` checks each one. The command runs on the host, outside the
+  sandbox, so its rules are the only limit on what the credential does: `gh
+  api` sends any request, so keep it under `approve`.
 
 Inside, a directory first on `PATH` holds a link named after each program, so
 `bz …` reaches the broker while `./bin/bz …` runs the real program directly.
 On Linux the link reaches the broker over a Unix socket, which needs
 `"allowAllUnixSockets": true` in `network`. Without it every brokered command
 runs inside the sandbox, with a warning.
-Brokered commands run with the full host environment, tokens included, in the
-caller's directory, on a pseudo-terminal when the caller has one. A command
-called from outside `_root` is refused. The broker is part of the `srtbox` process that launched the session,
-so it stops when the session ends.
+Brokered commands run with the full host environment, tokens included, plus
+their `env`, in the caller's directory, on a pseudo-terminal when the caller
+has one. A command called from outside `_root` is refused. The broker is part
+of the `srtbox` process that launched the session, so it stops when the
+session ends.
 
 **Approvals.** An `approve` command waits for your answer, given through a
 desktop notification (`notify-send` on Linux, a dialog on macOS) or by running
@@ -614,9 +667,10 @@ configure the tool to use `TMPDIR` instead.
 - A sandbox protects the session. It does not protect you from code the session
   wrote that you later run yourself: a test, a build script, a package
   manifest. srtbox covers what runs without anyone choosing to run it.
-- With `allowAllUnixSockets`, the D-Bus session bus is reachable on Linux, and
-  with it any secret stored in the desktop keyring, unless its socket is denied
-  (see [Credentials](#credentials)).
+- srtbox guards against mistakes, not attackers: a malicious actor could
+  likely break out.
+- `~/.claude.json` and Claude Code's memory files stay writable, and Claude on
+  the host loads both, so a session can add an MCP server or a memory there.
 - srt masks a denied home directory with a writable tmpfs, so a write there
   appears to succeed and is discarded when the command exits.
 

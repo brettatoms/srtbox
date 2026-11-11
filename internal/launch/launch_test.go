@@ -131,6 +131,7 @@ func TestBuildFillsTheListsSrtRequires(t *testing.T) {
 	conf := t.TempDir()
 	t.Setenv("SRTBOX_CONFIG_DIR", conf)
 	t.Setenv("SSH_AUTH_SOCK", "")
+	t.Setenv("XDG_RUNTIME_DIR", "")
 	os.WriteFile(filepath.Join(conf, "p.json"), []byte(`{}`), 0o600)
 	_, s, err := Build("p")
 	if err != nil {
@@ -217,5 +218,41 @@ func TestBuildRefusesAnOlderSrtbox(t *testing.T) {
 	t.Cleanup(func() { Version = old })
 	if _, _, err := Build("p"); err == nil || !strings.Contains(err.Error(), "9.0.0") {
 		t.Errorf("err %v; want the requirement named", err)
+	}
+}
+
+func TestDenyRuntimeDirOnLinuxOnly(t *testing.T) {
+	run := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", run)
+	for goos, want := range map[string]bool{"linux": true, "darwin": false} {
+		settings := map[string]any{"filesystem": map[string]any{"denyRead": []any{}}}
+		denyRuntimeDir(settings, goos)
+		got := slices.Contains(strs(settings["filesystem"].(map[string]any)["denyRead"]), run)
+		if got != want {
+			t.Errorf("%s: denied %v, want %v", goos, got, want)
+		}
+	}
+}
+
+func TestBuildProtectsAgentConfigUnlessTurnedOff(t *testing.T) {
+	conf := t.TempDir()
+	claude, _ := filepath.EvalSymlinks(t.TempDir())
+	os.WriteFile(filepath.Join(claude, "settings.json"), []byte("{}"), 0o600)
+	t.Setenv("SRTBOX_CONFIG_DIR", conf)
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	for _, off := range []bool{false, true} {
+		doc := `{"filesystem": {"allowWrite": ["` + claude + `"]}}`
+		if off {
+			doc = `{"_protectAgentConfig": false, "filesystem": {"allowWrite": ["` + claude + `"]}}`
+		}
+		os.WriteFile(filepath.Join(conf, "p.json"), []byte(doc), 0o600)
+		_, settings, err := Build("p")
+		if err != nil {
+			t.Fatal(err)
+		}
+		denied := slices.Contains(strs(settings["filesystem"].(map[string]any)["denyWrite"]), filepath.Join(claude, "settings.json"))
+		if denied == off {
+			t.Errorf("_protectAgentConfig off=%v: settings.json denied %v", off, denied)
+		}
 	}
 }

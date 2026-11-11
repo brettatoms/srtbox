@@ -5,7 +5,9 @@
 mkdir -p "$T/broker-out"
 cat > "$T/bin/e2e-tool" <<EOF
 #!/bin/sh
-if echo "\$*" >> "$T/broker-out/log" 2>/dev/null; then
+if [ "\$1" = token ]; then
+  echo "token=\${E2E_TOKEN:-none}"
+elif echo "\$*" >> "$T/broker-out/log" 2>/dev/null; then
   echo "ran on host: \$*"
 else
   echo "ran inside: \$*"
@@ -20,7 +22,8 @@ chmod +x "$T/bin/e2e-tool" "$T/bin/e2e-check"
 programs='{"e2e-tool": {
   "path": "'"$T"'/bin/e2e-tool",
   "check": "'"$T"'/bin/e2e-check",
-  "host": [["hello"]],
+  "host": [["hello"], ["token"]],
+  "env": {"E2E_TOKEN": {"from": "echo tok-e2e"}},
   "approve": [["ask"]]}}'
 # On Linux the sandbox reaches the broker's socket only with
 # allowAllUnixSockets; without it the client warns and runs every command
@@ -59,3 +62,9 @@ wait
 answer d &
 check "an approve rule is refused when denied" "was not approved" sbx broker e2e-tool ask
 wait
+
+check "a caller outside the root is refused" "outside the project root" \
+  sbx broker sh -c 'cd / && e2e-tool hello'
+check "a brokered program gets its credential" "token=tok-e2e" sbx broker e2e-tool token
+check "the sandbox never sees the credential" "inside=none" \
+  sbx broker sh -c 'echo "inside=${E2E_TOKEN:-none}"'

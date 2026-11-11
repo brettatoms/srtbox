@@ -164,6 +164,9 @@ type Meta struct {
 	Inject   map[string]any // variables fetched on the host and masked inside: name → {from, hosts}
 	Env      map[string]any // variables to set inside: name → value
 	Init     map[string]any // commands run inside before the user's: name → command or {command, timeout}
+	// ProtectAgentConfig denies writes to the agent config that runs outside
+	// the sandbox; on unless _protectAgentConfig is false.
+	ProtectAgentConfig bool
 }
 
 // Layer is one config file's contents, named as srtbox reports its rules.
@@ -414,6 +417,8 @@ func Split(doc map[string]any) (Meta, map[string]any) {
 		Inject:   obj(doc["_inject"]),
 		Env:      obj(doc["_env"]),
 		Init:     obj(doc["_init"]),
+
+		ProtectAgentConfig: doc["_protectAgentConfig"] != false,
 	}
 	for _, d := range strs(doc["_mkdir"]) {
 		m.Mkdir = append(m.Mkdir, Home(d))

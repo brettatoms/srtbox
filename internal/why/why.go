@@ -190,7 +190,7 @@ func Path(w io.Writer, pol *policy.Policy, arg string) {
 		line(w, "write", "yes", "no rule denies it")
 	case denyW != "":
 		why := rule(pol, "denyWrite", denyW)
-		if pol.Source("filesystem.denyWrite", denyW) == policy.SourceSrtbox {
+		if pol.Source("filesystem.denyWrite", denyW) == policy.SourceSrtbox && srtboxReason("denyWrite", denyW) == "" {
 			why += ": srtbox protects nested repos' git hooks and config, and tool config that runs code on the host"
 		}
 		line(w, "write", "no", why)
@@ -562,7 +562,23 @@ func rule(pol *policy.Policy, key, value string) string {
 	if strings.HasSuffix(key, "Domains") {
 		section = "network." + key
 	}
-	return fmt.Sprintf("%s %q (%s)", key, value, pol.Source(section, value))
+	src := pol.Source(section, value)
+	if r := srtboxReason(key, value); src == policy.SourceSrtbox && r != "" {
+		src += ": " + r
+	}
+	return fmt.Sprintf("%s %q (%s)", key, value, src)
+}
+
+// srtboxReason says why srtbox adds a rule of its own, where the rule alone
+// does not show it.
+func srtboxReason(key, value string) string {
+	switch {
+	case key == "denyRead" && value == os.Getenv("XDG_RUNTIME_DIR"):
+		return "it holds the login session's sockets; allowRead re-opens a path under it"
+	case key == "denyWrite" && config.Within(value, config.ClaudeConfigDir()):
+		return "Claude Code loads it outside the sandbox; _protectAgentConfig: false allows writes"
+	}
+	return ""
 }
 
 func line(w io.Writer, what, verdict, why string) {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -13,7 +14,7 @@ import (
 // link inside a writable path is not followed: an earlier session could have
 // planted it to point anywhere, and following it would grant that place.
 func FollowLinks(settings map[string]any, warn func(string)) {
-	writable := strs(get(settings, "filesystem", "allowWrite"))
+	writable, readOnly := writeRules(settings)
 	for _, key := range []string{"allowRead", "allowWrite"} {
 		for _, e := range strs(get(settings, "filesystem", key)) {
 			p := filepath.Clean(Home(e))
@@ -21,7 +22,7 @@ func FollowLinks(settings map[string]any, warn func(string)) {
 			if err != nil || real == p {
 				continue
 			}
-			if link := plantable(p, writable); link != "" {
+			if link := plantable(p, writable, readOnly); link != "" {
 				warn(fmt.Sprintf("not following %s in %s %q: it sits in a writable path", link, key, e))
 				continue
 			}
@@ -41,7 +42,8 @@ func ResolveRoot(root string, settings map[string]any) (string, error) {
 	if real == p {
 		return p, nil
 	}
-	if link := plantable(p, strs(get(settings, "filesystem", "allowWrite"))); link != "" {
+	writable, readOnly := writeRules(settings)
+	if link := plantable(p, writable, readOnly); link != "" {
 		return "", fmt.Errorf("_root %s passes through %s, a symbolic link in a writable path; write _root as the path it resolves to", root, link)
 	}
 	return real, nil
@@ -65,19 +67,19 @@ func resolvePath(p string) string {
 	}
 }
 
+// writeRules returns the allowWrite and denyWrite entries.
+func writeRules(settings map[string]any) (writable, readOnly []string) {
+	return strs(get(settings, "filesystem", "allowWrite")), strs(get(settings, "filesystem", "denyWrite"))
+}
+
 // plantable returns the first symbolic link on the way to p whose directory
-// a writable entry covers, or "". It follows each link through every
-// component of its target, and checks writable entries both as written and
-// resolved, since links are checked in their resolved directories.
-func plantable(p string, writable []string) string {
-	var dirs []string
-	for _, w := range writable {
-		w = filepath.Clean(Home(w))
-		dirs = append(dirs, w)
-		if real := resolvePath(w); real != w {
-			dirs = append(dirs, real)
-		}
-	}
+// a writable entry covers and no readOnly entry protects, or "". It follows
+// each link through every component of its target, and checks entries both
+// as written and resolved, since links are checked in their resolved
+// directories. A readOnly entry counts only when it covers the link's
+// directory: on Linux srt protects a link's target, not the link.
+func plantable(p string, writable, readOnly []string) string {
+	dirs, protected := forms(writable), forms(readOnly)
 	rest := strings.Split(p, "/")
 	cur := "/"
 	for links := 0; len(rest) > 0; {
@@ -95,10 +97,9 @@ func plantable(p string, writable []string) string {
 			cur = next
 			continue
 		}
-		for _, d := range dirs {
-			if under(cur, d) {
-				return next
-			}
+		if slices.ContainsFunc(dirs, func(d string) bool { return under(cur, d) }) &&
+			!slices.ContainsFunc(protected, func(d string) bool { return under(cur, d) }) {
+			return next
 		}
 		target, err := os.Readlink(next)
 		if links++; err != nil || links > 255 {
@@ -110,6 +111,20 @@ func plantable(p string, writable []string) string {
 		rest = append(strings.Split(target, "/"), rest...)
 	}
 	return ""
+}
+
+// forms returns each path cleaned, with ~ expanded, and also resolved where
+// that differs.
+func forms(paths []string) []string {
+	var out []string
+	for _, p := range paths {
+		p = filepath.Clean(Home(p))
+		out = append(out, p)
+		if real := resolvePath(p); real != p {
+			out = append(out, real)
+		}
+	}
+	return out
 }
 
 func under(p, dir string) bool {

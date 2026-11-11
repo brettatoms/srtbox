@@ -294,6 +294,40 @@ func TestFollowLinksAddsTargetsButNotPlantableOnes(t *testing.T) {
 	}
 }
 
+func TestFollowLinksFollowsALinkInAWriteProtectedDirectory(t *testing.T) {
+	// ~/.nix-profile leads through ~/.local/state/nix/profiles, which sits in
+	// a writable tree but is itself denied writes.
+	home, _ := filepath.EvalSymlinks(t.TempDir())
+	state := filepath.Join(home, "state")
+	profiles := filepath.Join(state, "profiles")
+	os.MkdirAll(filepath.Join(home, "store", "env"), 0o755)
+	os.MkdirAll(profiles, 0o755)
+	os.Symlink(filepath.Join(home, "store", "env"), filepath.Join(profiles, "profile"))
+	os.Symlink(filepath.Join(profiles, "profile"), filepath.Join(home, ".profile-link"))
+
+	follow := func(denied ...any) []string {
+		settings := map[string]any{"filesystem": map[string]any{
+			"allowRead":  []any{filepath.Join(home, ".profile-link")},
+			"allowWrite": []any{state},
+			"denyWrite":  denied,
+		}}
+		FollowLinks(settings, func(string) {})
+		return strs(get(settings, "filesystem", "allowRead"))
+	}
+	target := filepath.Join(home, "store", "env")
+	if reads := follow(); slices.Contains(reads, target) {
+		t.Errorf("followed a link in a writable directory: %v", reads)
+	}
+	if reads := follow(profiles); !slices.Contains(reads, target) {
+		t.Errorf("did not follow a link in a write-protected directory: %v", reads)
+	}
+	// Denying the link itself does not protect it on Linux, where srt
+	// protects only the link's target.
+	if reads := follow(filepath.Join(profiles, "profile")); slices.Contains(reads, target) {
+		t.Errorf("followed a link protected only by name: %v", reads)
+	}
+}
+
 func TestResolveRoot(t *testing.T) {
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	real := filepath.Join(dir, "real")

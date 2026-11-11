@@ -20,7 +20,7 @@
   },
 
   "filesystem": {
-    "denyRead": ["~", "${XDG_RUNTIME_DIR}/bus", "${XDG_RUNTIME_DIR}/keyring"],
+    "denyRead": ["~"],
     "allowRead": ["~/.claude", "~/.claude.json", "~/.gitconfig", "~/.config/git", "~/.local/bin"],
     "allowWrite": ["/tmp", "~/.claude", "~/.claude.json", "${XDG_RUNTIME_DIR}/clojure-mcp-light"]
   }

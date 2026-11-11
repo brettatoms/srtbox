@@ -65,7 +65,13 @@ func Build(project string) (config.Meta, map[string]any, error) {
 		config.AddEnvDeny(settings, deny...)
 	}
 
-	config.FollowLinks(settings, func(msg string) { fmt.Fprintln(os.Stderr, "srtbox: warning:", msg) })
+	warn := func(msg string) { fmt.Fprintln(os.Stderr, "srtbox: warning:", msg) }
+	if meta.ProtectAgentConfig {
+		meta.Mkdir = append(meta.Mkdir, protectAgentConfig(settings, runtime.GOOS, warn)...)
+	}
+	denyRuntimeDir(settings, runtime.GOOS)
+
+	config.FollowLinks(settings, warn)
 	allowTerminal(settings, runtime.GOOS)
 
 	// srt refuses settings that lack any of these lists, so a config can leave
@@ -322,6 +328,34 @@ func session(opts options, cmdArgs []string) int {
 func allowTerminal(settings map[string]any, goos string) {
 	if _, set := settings["allowPty"]; goos == "darwin" && !set {
 		settings["allowPty"] = true
+	}
+}
+
+// protectAgentConfig denies writes to Claude Code's config, and returns the
+// missing directories to create first so that srt can deny them on Linux.
+func protectAgentConfig(settings map[string]any, goos string, warn func(string)) []string {
+	c := config.ProtectAgentConfig(config.ClaudeConfigDir(), settings, goos)
+	config.Append(settings, []string{"filesystem", "denyWrite"}, c.Deny...)
+	if goos == "linux" {
+		for _, l := range c.Links {
+			warn(l + " is a symbolic link: srt protects only where it leads, so the sandbox can replace it; make it a real directory or file")
+		}
+	}
+	return c.Mkdir
+}
+
+// denyRuntimeDir hides $XDG_RUNTIME_DIR on Linux. It holds the login
+// session's sockets (the D-Bus session bus, the keyring, an editor's server)
+// that act on the host for whoever connects. allowRead and allowWrite entries
+// re-open paths under it. macOS has no such directory, and srtbox limits
+// sockets there with scopeUnixSockets.
+func denyRuntimeDir(settings map[string]any, goos string) {
+	d := os.Getenv("XDG_RUNTIME_DIR")
+	if goos != "linux" || d == "" {
+		return
+	}
+	if _, err := os.Stat(d); err == nil {
+		config.Append(settings, []string{"filesystem", "denyRead"}, d)
 	}
 }
 

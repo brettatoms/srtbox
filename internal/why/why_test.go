@@ -278,3 +278,21 @@ func TestPathUnderDenyReadWithOnlyAWriteGrant(t *testing.T) {
 	}
 	os.Chmod(cache, 0o755)
 }
+
+func TestSrtboxReasonNamesRuntimeDirAndAgentConfig(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+	t.Setenv("CLAUDE_CONFIG_DIR", "/home/u/.claude")
+	for _, c := range []struct {
+		key, value string
+		want       bool
+	}{
+		{"denyRead", "/run/user/1000", true},
+		{"denyRead", "/run/user/1000/bus", false},
+		{"denyWrite", "/home/u/.claude/settings.json", true},
+		{"denyWrite", "/home/u/repo/.git/hooks", false},
+	} {
+		if got := srtboxReason(c.key, c.value) != ""; got != c.want {
+			t.Errorf("%s %s: reason %v, want %v", c.key, c.value, got, c.want)
+		}
+	}
+}

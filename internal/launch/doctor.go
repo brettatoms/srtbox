@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -73,6 +74,9 @@ func Doctor(args []string) int {
 	}
 	fs = append(fs, finding{statusOK, "config " + project, strings.Join(names, ", ")})
 	fs = append(fs, writeOnlyFindings(settings)...)
+	if meta.ProtectAgentConfig {
+		fs = append(fs, agentConfigFindings(config.ProtectAgentConfig(config.ClaudeConfigDir(), settings, runtime.GOOS))...)
+	}
 
 	srt := srtFinding(srtVersion())
 	fs = append(fs, srt)
@@ -131,7 +135,8 @@ func srtFinding(have string) finding {
 	return finding{statusOK, "srt " + have, ""}
 }
 
-// brokerFindings checks that each brokered program and its check can run.
+// brokerFindings checks that each brokered program and its check can run,
+// and that each of its credentials can be fetched, never showing the value.
 func brokerFindings(programs map[string]*broker.Program) []finding {
 	var names []string
 	for n := range programs {
@@ -152,6 +157,19 @@ func brokerFindings(programs map[string]*broker.Program) []finding {
 			}
 		}
 		fs = append(fs, f)
+		var vars []string
+		for v := range p.Env {
+			vars = append(vars, v)
+		}
+		sort.Strings(vars)
+		for _, v := range vars {
+			label := "broker " + n + " env " + v
+			if _, err := config.Fetch(config.Command(p.Env[v].From), false); err != nil {
+				fs = append(fs, finding{statusWarn, label, err.Error() + "; its calls are refused"})
+			} else {
+				fs = append(fs, finding{statusOK, label, ""})
+			}
+		}
 	}
 	return fs
 }
@@ -173,7 +191,7 @@ func injectFindings(raw map[string]any) []finding {
 			continue
 		}
 		optional, _ := spec["optional"].(bool)
-		if _, err := fetch(argv, optional); err != nil {
+		if _, err := config.Fetch(argv, optional); err != nil {
 			if optional {
 				fs = append(fs, finding{statusSkip, "inject " + n, "not set; optional"})
 			} else {
@@ -207,6 +225,20 @@ func writeOnlyFindings(settings map[string]any) []finding {
 		}
 	}
 	return fs
+}
+
+// agentConfigFindings names the agent config files left writable because they
+// do not exist yet: on Linux srt could deny one only by creating it on the
+// host.
+func agentConfigFindings(c config.AgentConfig) []finding {
+	if len(c.Missing) == 0 {
+		return nil
+	}
+	var names []string
+	for _, p := range c.Missing {
+		names = append(names, filepath.Base(p))
+	}
+	return []finding{{statusSkip, "agent config " + filepath.Dir(c.Missing[0]), "not protected until they exist: " + strings.Join(names, ", ")}}
 }
 
 // probe starts a session that runs `true`. It is the one check that shows

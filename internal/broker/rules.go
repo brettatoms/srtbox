@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 
@@ -21,7 +22,18 @@ type Program struct {
 	Host    [][]string `json:"host"`    // run on the host
 	Approve [][]string `json:"approve"` // run on the host once the user approves
 	Stdin   [][]string `json:"stdin"`   // forward the caller's input to these
+	// Env holds credentials only this program gets: each variable's from
+	// command runs on the host for every call, and its value never enters
+	// the sandbox.
+	Env map[string]Credential `json:"env"`
 }
+
+// Credential is a host command that prints a value, such as "gh auth token".
+type Credential struct {
+	From any `json:"from"`
+}
+
+var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // Parse reads the _broker config: program name to Program.
 func Parse(raw map[string]any) (map[string]*Program, error) {
@@ -45,6 +57,14 @@ func Parse(raw map[string]any) (map[string]*Program, error) {
 		p.Path = config.Home(p.Path)
 		if p.Check != "" {
 			p.Check = config.Home(p.Check)
+		}
+		for _, v := range sortedKeys(p.Env) {
+			if !envName.MatchString(v) {
+				return nil, fmt.Errorf("_broker.%s.env: %q is not a variable name", name, v)
+			}
+			if len(config.Command(p.Env[v].From)) == 0 {
+				return nil, fmt.Errorf("_broker.%s.env.%s: no from command", name, v)
+			}
 		}
 		for _, f := range []string{p.Path, p.Check} {
 			if f == "" {
@@ -92,6 +112,21 @@ func (p *Program) classify(argv []string) (verdict, []string) {
 		return runHost, best
 	}
 	return runLocal, nil
+}
+
+// environ returns env with the program's credentials added. They are
+// fetched for each call, so a value that expires stays current and none is
+// kept between calls.
+func (p *Program) environ(env []string) ([]string, error) {
+	out := slices.Clip(env)
+	for _, name := range sortedKeys(p.Env) {
+		v, err := config.Fetch(config.Command(p.Env[name].From), false)
+		if err != nil {
+			return nil, fmt.Errorf("could not get %s: %w", name, err)
+		}
+		out = append(out, name+"="+v)
+	}
+	return out, nil
 }
 
 func (p *Program) wantsStdin(argv []string) bool {

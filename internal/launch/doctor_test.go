@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/brettatoms/srtbox/internal/broker"
+	"github.com/brettatoms/srtbox/internal/config"
 )
 
 func TestSrtFinding(t *testing.T) {
@@ -75,5 +76,32 @@ func TestWriteOnlyFindingsNameGrantsThatReadDiffersFor(t *testing.T) {
 	if len(fs) != 1 || fs[0].status != statusWarn || fs[0].label != `allowWrite "/h/.aws/sso/cache"` ||
 		!strings.Contains(fs[0].msg, `denyRead "/h"`) {
 		t.Errorf("findings %+v; want one warning for the grant no allowRead covers", fs)
+	}
+}
+
+func TestAgentConfigFindingsNameMissingFiles(t *testing.T) {
+	if fs := agentConfigFindings(config.AgentConfig{}); len(fs) != 0 {
+		t.Errorf("findings with nothing missing: %v", fs)
+	}
+	fs := agentConfigFindings(config.AgentConfig{Missing: []string{"/h/.claude/loop.md", "/h/.claude/launch.json"}})
+	if len(fs) != 1 || fs[0].status != statusSkip || !strings.Contains(fs[0].msg, "loop.md, launch.json") {
+		t.Errorf("findings %v", fs)
+	}
+}
+
+func TestBrokerFindingsCheckCredentialsWithoutShowingThem(t *testing.T) {
+	run := filepath.Join(t.TempDir(), "gh")
+	os.WriteFile(run, []byte("#!/bin/sh\n"), 0o755)
+	fs := brokerFindings(map[string]*broker.Program{"gh": {Name: "gh", Path: run, Env: map[string]broker.Credential{
+		"GOOD": {From: "echo s3cret"},
+		"BAD":  {From: "false"},
+	}}})
+	if len(fs) != 3 || fs[1].label != "broker gh env BAD" || fs[1].status != statusWarn || fs[2].status != statusOK {
+		t.Errorf("findings %+v", fs)
+	}
+	for _, f := range fs {
+		if strings.Contains(f.msg, "s3cret") {
+			t.Errorf("finding shows the value: %+v", f)
+		}
 	}
 }
