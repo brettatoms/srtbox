@@ -63,6 +63,8 @@ func ProjectFor(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Compare resolved paths, so a root or dir reached through a link matches.
+	dir = resolvePath(dir)
 	best, bestRoot := "", ""
 	for _, n := range names {
 		doc, err := Load(n)
@@ -70,11 +72,15 @@ func ProjectFor(dir string) (string, error) {
 			return "", err
 		}
 		m, _ := Split(Expand(doc, os.LookupEnv).(map[string]any))
-		if m.Root == "" || !Within(dir, m.Root) {
+		if m.Root == "" {
 			continue
 		}
-		if len(m.Root) > len(bestRoot) {
-			best, bestRoot = n, m.Root
+		root := resolvePath(m.Root)
+		if !Within(dir, root) {
+			continue
+		}
+		if len(root) > len(bestRoot) {
+			best, bestRoot = n, root
 		}
 	}
 	if best == "" {

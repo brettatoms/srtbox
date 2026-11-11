@@ -143,26 +143,55 @@ esac
 	}
 	sock := serve(t, &Server{Programs: map[string]*Program{"tool": prog}, Root: root, Env: os.Environ()})
 
-	if r := call(t, sock, request{Program: "tool", Argv: []string{"echo", "a", "b"}}, ""); r.stdout != "out:a b\n" || r.stderr != "err\n" || r.code != 3 {
+	if r := call(t, sock, request{Program: "tool", Argv: []string{"echo", "a", "b"}, Cwd: root}, ""); r.stdout != "out:a b\n" || r.stderr != "err\n" || r.code != 3 {
 		t.Errorf("echo: %+v", r)
 	}
 	if r := call(t, sock, request{Program: "tool", Argv: []string{"local", "thing"}}, ""); !r.local {
 		t.Errorf("unmatched command should run locally: %+v", r)
 	}
-	if r := call(t, sock, request{Program: "tool", Argv: []string{"echo", "forbidden"}}, ""); r.code != 126 || !strings.Contains(r.stderr, "no forbidden") {
+	if r := call(t, sock, request{Program: "tool", Argv: []string{"echo", "forbidden"}, Cwd: root}, ""); r.code != 126 || !strings.Contains(r.stderr, "no forbidden") {
 		t.Errorf("check hook: %+v", r)
 	}
-	if r := call(t, sock, request{Program: "tool", Argv: []string{"pwd"}, Cwd: "/"}, ""); strings.TrimSpace(r.stdout) != root {
-		t.Errorf("cwd outside root should become root: %+v", r)
+	if r := call(t, sock, request{Program: "tool", Argv: []string{"pwd"}, Cwd: "/"}, ""); r.code != 126 || r.stdout != "" || !strings.Contains(r.stderr, "outside the project root") {
+		t.Errorf("cwd outside root should be refused: %+v", r)
 	}
-	if r := call(t, sock, request{Program: "tool", Argv: []string{"cat"}}, "piped"); r.stdout != "piped" {
+	if r := call(t, sock, request{Program: "tool", Argv: []string{"cat"}, Cwd: root}, "piped"); r.stdout != "piped" {
 		t.Errorf("stdin rule: %+v", r)
 	}
 	if r := call(t, sock, request{Program: "other"}, ""); r.code != 126 {
 		t.Errorf("unknown program: %+v", r)
 	}
-	if r := call(t, sock, request{Program: "tool", Argv: []string{"tty"}, TTY: true, Rows: 24, Cols: 80}, ""); strings.TrimSpace(r.stdout) != "tty" {
+	if r := call(t, sock, request{Program: "tool", Argv: []string{"tty"}, TTY: true, Rows: 24, Cols: 80, Cwd: root}, ""); strings.TrimSpace(r.stdout) != "tty" {
 		t.Errorf("pty: %+v", r)
+	}
+}
+
+func TestServerKeepsCallersWithinItsRoot(t *testing.T) {
+	// The server gets the resolved root; callers may send paths through a link.
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	real := filepath.Join(dir, "real")
+	os.MkdirAll(filepath.Join(real, "proj", "sub"), 0o755)
+	os.Mkdir(filepath.Join(real, "other"), 0o755)
+	os.Symlink(real, filepath.Join(dir, "link"))
+
+	prog := &Program{Name: "tool", Path: script(t, dir, "tool", "pwd"), Host: [][]string{{"pwd"}}}
+	sock := serve(t, &Server{Programs: map[string]*Program{"tool": prog}, Root: filepath.Join(real, "proj"), Env: os.Environ()})
+
+	sub := filepath.Join(real, "proj", "sub")
+	for _, cwd := range []string{sub, filepath.Join(dir, "link", "proj", "sub")} {
+		if r := call(t, sock, request{Program: "tool", Argv: []string{"pwd"}, Cwd: cwd}, ""); strings.TrimSpace(r.stdout) != sub {
+			t.Errorf("from %s: %+v; want it run in %s", cwd, r, sub)
+		}
+	}
+	for cwd, why := range map[string]string{
+		filepath.Join(real, "other"):        "outside the project root",
+		filepath.Join(dir, "link", "other"): "outside the project root",
+		filepath.Join(real, "proj", "gone"): "does not exist on the host",
+		"":                                  "is unknown",
+	} {
+		if r := call(t, sock, request{Program: "tool", Argv: []string{"pwd"}, Cwd: cwd}, ""); r.code != 126 || r.stdout != "" || !strings.Contains(r.stderr, why) {
+			t.Errorf("from %q: %+v; want it refused as %q", cwd, r, why)
+		}
 	}
 }
 

@@ -30,29 +30,84 @@ func FollowLinks(settings map[string]any, warn func(string)) {
 	}
 }
 
+// ResolveRoot returns root with symbolic links resolved, the form the
+// sandbox's paths take. A root that does not exist yet has the links in its
+// existing ancestors resolved. It refuses a root reached through a link in a
+// writable path, which an earlier session could have planted to move the root
+// anywhere.
+func ResolveRoot(root string, settings map[string]any) (string, error) {
+	p := filepath.Clean(root)
+	real := resolvePath(p)
+	if real == p {
+		return p, nil
+	}
+	if link := plantable(p, strs(get(settings, "filesystem", "allowWrite"))); link != "" {
+		return "", fmt.Errorf("_root %s passes through %s, a symbolic link in a writable path; write _root as the path it resolves to", root, link)
+	}
+	return real, nil
+}
+
+// resolvePath resolves the links in p's longest existing ancestor and keeps
+// the rest of p as written.
+func resolvePath(p string) string {
+	p = filepath.Clean(p)
+	rest := ""
+	for {
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(real, rest)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return filepath.Join(p, rest)
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		p = parent
+	}
+}
+
 // plantable returns the first symbolic link on the way to p whose directory
-// a writable entry covers, or "".
+// a writable entry covers, or "". It follows each link through every
+// component of its target, and checks writable entries both as written and
+// resolved, since links are checked in their resolved directories.
 func plantable(p string, writable []string) string {
-	parts := strings.Split(strings.TrimPrefix(p, "/"), "/")
+	var dirs []string
+	for _, w := range writable {
+		w = filepath.Clean(Home(w))
+		dirs = append(dirs, w)
+		if real := resolvePath(w); real != w {
+			dirs = append(dirs, real)
+		}
+	}
+	rest := strings.Split(p, "/")
 	cur := "/"
-	for _, part := range parts {
+	for links := 0; len(rest) > 0; {
+		part := rest[0]
+		rest = rest[1:]
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			cur = filepath.Dir(cur)
+			continue
+		}
 		next := filepath.Join(cur, part)
-		if fi, err := os.Lstat(next); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-			for _, w := range writable {
-				if under(cur, filepath.Clean(Home(w))) {
-					return next
-				}
-			}
-			target, err := os.Readlink(next)
-			if err != nil {
+		if fi, err := os.Lstat(next); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			cur = next
+			continue
+		}
+		for _, d := range dirs {
+			if under(cur, d) {
 				return next
 			}
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(cur, target)
-			}
-			next = filepath.Clean(target)
 		}
-		cur = next
+		target, err := os.Readlink(next)
+		if links++; err != nil || links > 255 {
+			return next
+		}
+		if filepath.IsAbs(target) {
+			cur = "/"
+		}
+		rest = append(strings.Split(target, "/"), rest...)
 	}
 	return ""
 }

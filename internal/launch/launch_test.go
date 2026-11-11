@@ -55,7 +55,9 @@ func TestParseSSHConfig(t *testing.T) {
 // withheld variables, and srtbox's own binary made readable.
 func TestBuild(t *testing.T) {
 	conf := t.TempDir()
-	proj := t.TempDir()
+	// Build resolves the root; on macOS the temporary directory sits behind a
+	// link.
+	proj, _ := filepath.EvalSymlinks(t.TempDir())
 	os.MkdirAll(filepath.Join(proj, "nested/.git/hooks"), 0o755)
 	t.Setenv("SRTBOX_CONFIG_DIR", conf)
 	t.Setenv("SRTBOX_TEST_TOKEN", "secret")
@@ -90,6 +92,30 @@ func TestBuild(t *testing.T) {
 	exe, _ := self()
 	if !slices.Contains(strs(s["filesystem"].(map[string]any)["allowRead"]), exe) {
 		t.Error("srtbox's own binary is not readable inside")
+	}
+}
+
+func TestBuildResolvesARootWrittenThroughALink(t *testing.T) {
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	conf := filepath.Join(dir, "conf")
+	os.Mkdir(conf, 0o700)
+	real := filepath.Join(dir, "real")
+	os.MkdirAll(filepath.Join(real, "proj", "nested", ".git", "hooks"), 0o755)
+	os.Symlink(real, filepath.Join(dir, "link"))
+	t.Setenv("SRTBOX_CONFIG_DIR", conf)
+	t.Setenv("SSH_AUTH_SOCK", "")
+	os.WriteFile(filepath.Join(conf, "p.json"), []byte(`{"_root":"`+filepath.Join(dir, "link", "proj")+`"}`), 0o600)
+
+	meta, s, err := Build("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(real, "proj"); meta.Root != want {
+		t.Errorf("root %q; want %q", meta.Root, want)
+	}
+	deny := strs(s["filesystem"].(map[string]any)["denyWrite"])
+	if !slices.Contains(deny, filepath.Join(real, "proj", "nested", ".git", "hooks")) {
+		t.Errorf("hooks not protected at the resolved path: %v", deny)
 	}
 }
 

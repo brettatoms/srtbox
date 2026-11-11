@@ -44,6 +44,9 @@ func Build(project string) (config.Meta, map[string]any, error) {
 	}
 
 	if meta.Root != "" {
+		if meta.Root, err = config.ResolveRoot(meta.Root, settings); err != nil {
+			return config.Meta{}, nil, err
+		}
 		if paths := config.ProtectRepos(meta.Root, repoSearchDepth, nil); len(paths) > 0 {
 			config.Append(settings, []string{"filesystem", "denyWrite"}, paths...)
 		}
@@ -108,7 +111,11 @@ func session(opts options, cmdArgs []string) int {
 	}
 	warnDefault(project, meta.Root)
 	if meta.Root != "" {
-		if cwd, _ := os.Getwd(); !config.Within(cwd, meta.Root) {
+		cwd, _ := os.Getwd()
+		if real, err := filepath.EvalSymlinks(cwd); err == nil {
+			cwd = real
+		}
+		if !config.Within(cwd, meta.Root) {
 			fmt.Fprintf(os.Stderr, "srtbox: warning: cwd is outside %s; the sandbox grants that tree, not this one\n", meta.Root)
 		}
 	}

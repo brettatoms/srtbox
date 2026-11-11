@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -61,7 +62,11 @@ func (s *Server) handle(conn net.Conn) {
 		out.send(kindLocal, nil)
 		return
 	}
-	cwd := s.workdir(req.Cwd)
+	cwd, err := s.workdir(req.Cwd)
+	if err != nil {
+		refuse(fmt.Sprintf("%s was not run: %v", display(p.Name, req.Argv), err))
+		return
+	}
 	if p.Check != "" {
 		if msg, ok := s.check(p, req.Argv, cwd); !ok {
 			out.send(kindStderr, msg)
@@ -83,21 +88,29 @@ func (s *Server) handle(conn net.Conn) {
 	s.run(conn, br, out, p, req, cwd)
 }
 
-// workdir returns dir when it lies within Root, and Root otherwise.
-func (s *Server) workdir(dir string) string {
+// workdir returns dir resolved, or an error when it is unknown, missing on
+// the host, or outside Root, which is itself resolved. A caller outside Root
+// is refused rather than moved, since a command run elsewhere could act on a
+// repo the caller didn't choose.
+func (s *Server) workdir(dir string) (string, error) {
 	if s.Root == "" {
 		if dir != "" {
-			return dir
+			return dir, nil
 		}
 		d, _ := os.Getwd()
-		return d
+		return d, nil
 	}
-	if real, err := filepath.EvalSymlinks(dir); err == nil {
-		if rel, err := filepath.Rel(s.Root, real); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
-			return real
-		}
+	if dir == "" {
+		return "", errors.New("its working directory is unknown; it may have been removed")
 	}
-	return s.Root
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", fmt.Errorf("its working directory %q does not exist on the host", dir)
+	}
+	if rel, err := filepath.Rel(s.Root, real); err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", fmt.Errorf("its working directory %q is outside the project root %s", dir, s.Root)
+	}
+	return real, nil
 }
 
 // check runs the program's check hook with argv. A non-zero exit refuses the

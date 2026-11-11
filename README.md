@@ -150,7 +150,7 @@ Keys starting with `_` are read by srtbox and never passed to srt:
 
 | Key | Meaning |
 |---|---|
-| `_root` | The project tree. `run` picks the project from it when `-p` is omitted, nested repos are found under it, and srtbox warns when launched outside it. |
+| `_root` | The project tree. `run` picks the project from it when `-p` is omitted, nested repos are found under it, and srtbox warns when launched outside it. Symbolic links in it are resolved at launch; srtbox refuses a `_root` that passes through a link in a writable path. |
 | `_forward` | Host loopback ports to relay in: `"3000"`, a range such as `"3020-3039"` (at most 1000 ports), or `"@path"` for a file holding a port number, relative to `_root`, such as `.nrepl-port`. srtbox refuses to launch with an entry that is none of these. |
 | `_include` | Files to merge between `base.json` and the project file, named relative to the config directory, such as `include/team.json`. Read only in project files, one level deep. A file that is missing or resolves outside the config directory stops the launch. |
 | `_requires` | The oldest srtbox version the file works with, such as `"0.3.0"`. An older srtbox refuses to launch. Development builds skip the check. |
@@ -529,8 +529,8 @@ On Linux the link reaches the broker over a Unix socket, which needs
 `"allowAllUnixSockets": true` in `network`. Without it every brokered command
 runs inside the sandbox, with a warning.
 Brokered commands run with the full host environment, tokens included, in the
-caller's directory (kept within `_root`), on a pseudo-terminal when the caller
-has one. The broker is part of the `srtbox` process that launched the session,
+caller's directory, on a pseudo-terminal when the caller has one. A command
+called from outside `_root` is refused. The broker is part of the `srtbox` process that launched the session,
 so it stops when the session ends.
 
 **Approvals.** An `approve` command waits for your answer, given through a

@@ -176,6 +176,29 @@ func TestProjectForPicksTheDeepestRoot(t *testing.T) {
 	}
 }
 
+func TestProjectForMatchesThroughLinks(t *testing.T) {
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	conf := filepath.Join(dir, "conf")
+	os.Mkdir(conf, 0o700)
+	t.Setenv("SRTBOX_CONFIG_DIR", conf)
+	real := filepath.Join(dir, "real")
+	os.MkdirAll(filepath.Join(real, "proj", "sub"), 0o755)
+	os.Symlink(real, filepath.Join(dir, "link"))
+	os.WriteFile(filepath.Join(conf, "base.json"), []byte(`{}`), 0o600)
+	os.WriteFile(filepath.Join(conf, "viaLink.json"), []byte(`{"_root":"`+filepath.Join(dir, "link", "proj")+`"}`), 0o600)
+
+	for _, d := range []string{filepath.Join(real, "proj", "sub"), filepath.Join(dir, "link", "proj", "sub")} {
+		if got, err := ProjectFor(d); err != nil || got != "viaLink" {
+			t.Errorf("ProjectFor(%q) = %q, %v; want viaLink", d, got, err)
+		}
+	}
+	// A root that does not exist yet still matches through the link.
+	os.WriteFile(filepath.Join(conf, "missing.json"), []byte(`{"_root":"`+filepath.Join(dir, "link", "new")+`"}`), 0o600)
+	if got, err := ProjectFor(filepath.Join(real, "new", "x")); err != nil || got != "missing" {
+		t.Errorf("ProjectFor under a missing root = %q, %v; want missing", got, err)
+	}
+}
+
 func TestProjectForWithoutConfigDir(t *testing.T) {
 	t.Setenv("SRTBOX_CONFIG_DIR", filepath.Join(t.TempDir(), "missing"))
 	if got, err := ProjectFor("/elsewhere"); err != nil || got != DefaultProject {
@@ -268,6 +291,57 @@ func TestFollowLinksAddsTargetsButNotPlantableOnes(t *testing.T) {
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "planted") {
 		t.Errorf("warnings %v", warnings)
+	}
+}
+
+func TestResolveRoot(t *testing.T) {
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	real := filepath.Join(dir, "real")
+	os.MkdirAll(filepath.Join(real, "proj"), 0o755)
+	os.Symlink(real, filepath.Join(dir, "link"))
+	viaLink := filepath.Join(dir, "link", "proj")
+	settings := func(writable ...string) map[string]any {
+		var w []any
+		for _, p := range writable {
+			w = append(w, p)
+		}
+		return map[string]any{"filesystem": map[string]any{"allowWrite": w}}
+	}
+
+	if got, err := ResolveRoot(viaLink+"/", settings(viaLink)); err != nil || got != filepath.Join(real, "proj") {
+		t.Errorf("through a link: %q, %v", got, err)
+	}
+	if got, err := ResolveRoot(filepath.Join(dir, "missing"), settings()); err != nil || got != filepath.Join(dir, "missing") {
+		t.Errorf("missing root: %q, %v; want it as written", got, err)
+	}
+	// A session that can write dir could have planted the link.
+	if _, err := ResolveRoot(viaLink, settings(dir)); err == nil || !strings.Contains(err.Error(), filepath.Join(dir, "link")) {
+		t.Errorf("link in a writable path: %v; want a refusal naming it", err)
+	}
+	// The same, with the writable entry written through a link.
+	os.Symlink(dir, filepath.Join(real, "up"))
+	if _, err := ResolveRoot(viaLink, settings(filepath.Join(real, "up"))); err == nil {
+		t.Error("link in a writable path written through a link: want a refusal")
+	}
+	if got, err := ResolveRoot(filepath.Join(dir, "link", "new"), settings()); err != nil || got != filepath.Join(real, "new") {
+		t.Errorf("missing root behind a link: %q, %v; want its existing part resolved", got, err)
+	}
+}
+
+func TestResolveRootChecksLinksInsideALinksTarget(t *testing.T) {
+	// root/l -> ws/cur, and ws/cur -> secret was planted by a session that can
+	// write ws.
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	ws := filepath.Join(dir, "ws")
+	os.MkdirAll(ws, 0o755)
+	os.MkdirAll(filepath.Join(dir, "secret", "proj"), 0o755)
+	os.Symlink(filepath.Join(dir, "secret"), filepath.Join(ws, "cur"))
+	os.Symlink(filepath.Join(ws, "cur"), filepath.Join(dir, "l"))
+	settings := map[string]any{"filesystem": map[string]any{"allowWrite": []any{ws}}}
+
+	_, err := ResolveRoot(filepath.Join(dir, "l", "proj"), settings)
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(ws, "cur")) {
+		t.Errorf("err %v; want a refusal naming %s", err, filepath.Join(ws, "cur"))
 	}
 }
 
